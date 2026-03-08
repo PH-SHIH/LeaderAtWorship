@@ -25,6 +25,15 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
     output_dir = audio_path.parent / "separated"
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    stem_name = audio_path.stem
+    model_name = settings.demucs_model
+
+    # Check if separation already done (any model) — reuse existing results
+    vocals, no_vocals = _find_existing_output(output_dir, stem_name, model_name)
+    if vocals and vocals.exists():
+        logger.info("Reusing existing separation: %s", vocals)
+        return vocals, no_vocals
+
     cmd = [
         "python",
         "-m",
@@ -32,7 +41,7 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
         "--two-stems",
         "vocals",
         "-n",
-        settings.demucs_model,
+        model_name,
         "-d",
         settings.demucs_device,
         "--shifts",
@@ -50,7 +59,7 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
 
     logger.info(
         "Demucs: model=%s device=%s shifts=%d segment=%ds overlap=%.2f jobs=%d",
-        settings.demucs_model,
+        model_name,
         settings.demucs_device,
         settings.demucs_shifts,
         settings.demucs_segment,
@@ -67,13 +76,17 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
             "OMP_NUM_THREADS": str(settings.demucs_jobs),
         }
         t0 = time.perf_counter()
-        result = subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            env=env,
-        )
+        try:
+            result = subprocess.run(
+                cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+        except subprocess.CalledProcessError as e:
+            logger.error("Demucs stderr:\n%s", e.stderr)
+            raise
         elapsed = time.perf_counter() - t0
         logger.info("Demucs finished in %.1fs", elapsed)
         if result.stderr:
@@ -82,9 +95,30 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
 
     await asyncio.to_thread(_run_demucs)
 
-    stem_name = audio_path.stem
-    model_name = settings.demucs_model
     vocals = output_dir / model_name / stem_name / "vocals.wav"
     no_vocals = output_dir / model_name / stem_name / "no_vocals.wav"
 
     return vocals, no_vocals
+
+
+def _find_existing_output(
+    output_dir: Path, stem_name: str, preferred_model: str
+) -> tuple[Path | None, Path | None]:
+    """Look for existing separation results, preferring the configured model."""
+    # Try configured model first
+    vocals = output_dir / preferred_model / stem_name / "vocals.wav"
+    if vocals.exists():
+        no_vocals = output_dir / preferred_model / stem_name / "no_vocals.wav"
+        return vocals, no_vocals
+
+    # Fall back to any model that has results for this stem
+    if output_dir.exists():
+        for model_dir in output_dir.iterdir():
+            if model_dir.is_dir():
+                v = model_dir / stem_name / "vocals.wav"
+                if v.exists():
+                    nv = model_dir / stem_name / "no_vocals.wav"
+                    logger.info("Found existing separation from model '%s'", model_dir.name)
+                    return v, nv
+
+    return None, None

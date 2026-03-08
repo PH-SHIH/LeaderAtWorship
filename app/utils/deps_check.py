@@ -18,9 +18,9 @@ def check_demucs() -> bool:
 
 
 def check_whisper() -> bool:
-    """Check if OpenAI Whisper (speech-to-text) is available."""
+    """Check if mlx-whisper (speech-to-text on Apple Silicon) is available."""
     try:
-        import whisper  # noqa: F401
+        import mlx_whisper  # noqa: F401
 
         return True
     except ImportError:

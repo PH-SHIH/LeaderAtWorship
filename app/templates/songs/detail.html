@@ -1,11 +1,60 @@
 {% extends "base.html" %}
 
-{% block title %}詩歌詳情{% endblock %}
+{% block title %}詩歌詳情 - LeaderAtWorship{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', path='css/player.css') }}">
+{% endblock %}
 
 {% block content %}
 <div class="song-detail">
-    <h1 id="song-title">載入中...</h1>
-    <div id="song-info"></div>
-    <div id="song-lyrics"></div>
+    <div class="song-header">
+        <a href="/songs" class="btn">&larr; 返回歌曲庫</a>
+        <h1 id="song-title">載入中...</h1>
+        <p id="song-meta" class="text-muted"></p>
+    </div>
+
+    <!-- Audio Player Section -->
+    <div class="card player-section hidden" id="player-section">
+        <audio id="audio-player" preload="metadata"></audio>
+        <div class="player-bar">
+            <button id="play-btn" class="btn btn-primary play-btn" title="播放/暫停">&#9654;</button>
+            <span id="current-time" class="time-display">0:00</span>
+            <input type="range" id="seek-bar" class="seek-bar" min="0" max="100" value="0" step="0.1">
+            <span id="duration" class="time-display">0:00</span>
+        </div>
+        <div class="track-switch" id="track-switch">
+            <label><input type="radio" name="track" value="original" checked> 原聲</label>
+            <label class="hidden" id="vocals-option"><input type="radio" name="track" value="vocals"> 人聲</label>
+        </div>
+    </div>
+
+    <!-- Subtitle Display Section -->
+    <div class="card subtitle-section hidden" id="subtitle-section">
+        <div class="subtitle-header">
+            <h2>字幕</h2>
+            <div id="alignment-info" class="alignment-info hidden"></div>
+        </div>
+        <div id="subtitle-lines" class="subtitle-lines">
+        </div>
+    </div>
+
+    <!-- No Audio Fallback -->
+    <div id="no-audio-msg" class="card hidden">
+        <p class="text-muted">此歌曲沒有音頻檔案。前往<a href="/audio">音頻處理</a>頁面擷取音頻。</p>
+    </div>
+
+    <!-- Lyrics Section -->
+    <div id="lyrics-section" class="card hidden">
+        <h2>歌詞</h2>
+        <pre id="lyrics-content" class="lyrics-content"></pre>
+    </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const SONG_ID = {{ song_id }};
+</script>
+<script src="{{ url_for('static', path='js/player.js') }}"></script>
 {% endblock %}

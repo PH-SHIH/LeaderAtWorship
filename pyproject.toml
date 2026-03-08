@@ -19,6 +19,11 @@ dependencies = [
     # Audio processing
     "yt-dlp>=2025.1.15",
 
+    # Lyrics alignment
+    "syncedlyrics>=0.10.0",
+    "rapidfuzz>=3.0.0",
+    "hanziconv>=0.3.2",
+
     # Utilities
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
@@ -30,7 +35,8 @@ dependencies = [
 [project.optional-dependencies]
 ml = [
     "demucs>=4.0.1",
-    "openai-whisper>=20240930",
+    "mlx-whisper>=0.4.0",
+    "librosa>=0.10.0",
 ]
 dev = [
     "pytest>=8.3.0",
