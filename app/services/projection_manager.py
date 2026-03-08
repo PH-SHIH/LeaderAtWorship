@@ -7,6 +7,7 @@ from fastapi import WebSocket
 class SubtitleLineData:
     text: str = ""
     text_secondary: str = ""
+    start_ms: int = 0
 
 
 @dataclass
@@ -76,7 +77,7 @@ class ProjectionManager:
         state.current_song_id = item.song_id
         state.total_lines = len(item.lines)
         state.current_item_lines = [
-            {"text": l.text, "text_secondary": l.text_secondary}
+            {"text": l.text, "text_secondary": l.text_secondary, "start_ms": l.start_ms}
             for l in item.lines
         ]
 

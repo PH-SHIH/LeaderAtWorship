@@ -69,6 +69,7 @@ async def create_session(
                             lines.append(SubtitleLineData(
                                 text=sl.text or "",
                                 text_secondary=sl.text_secondary or "",
+                                start_ms=sl.start_ms or 0,
                             ))
 
                 # Non-song items get a single "title" line

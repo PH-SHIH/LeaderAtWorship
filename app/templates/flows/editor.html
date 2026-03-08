@@ -354,9 +354,8 @@ function pickSong(songId, el) {
 async function launchProjection() {
     if (!currentFlowId) return alert('請先選擇一個流程');
 
-    // Open windows immediately on user click to avoid popup blocker
-    const displayWin = window.open('about:blank', '_blank');
-    const controlWin = window.open('about:blank', 'projection-control', 'width=400,height=600');
+    // Open display window immediately on user click to avoid popup blocker
+    const displayWin = window.open('about:blank', 'projection-display');
 
     try {
         // Save current edits first
@@ -370,13 +369,11 @@ async function launchProjection() {
         const data = await resp.json();
         const sid = data.id;
 
-        // Navigate the pre-opened windows to the correct URLs
+        // Display opens in new window, current page becomes control panel
         if (displayWin) displayWin.location.href = `/projection/display/${sid}`;
-        if (controlWin) controlWin.location.href = `/projection/control/${sid}`;
+        window.location.href = `/projection/control/${sid}`;
     } catch (err) {
-        // Close the blank windows on error
         if (displayWin) displayWin.close();
-        if (controlWin) controlWin.close();
         alert('無法啟動投影：' + err.message);
     }
 }

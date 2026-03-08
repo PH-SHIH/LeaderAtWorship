@@ -9,6 +9,9 @@ const client = new WSClient(SESSION_ID, 'controller', (msg) => {
 // Cache items from state for rendering line lists
 let cachedItems = [];
 let currentSongId = null;
+let cachedLineTimings = []; // [{start_ms}, ...] for current item
+let lastSyncedLineIndex = -1;
+let currentLineIndex = 0;
 
 function sendCommand(action) {
     client.send({ action });
@@ -48,6 +51,11 @@ function updateControllerUI(state) {
         renderItemNav(state);
         renderLineNav(state);
     }
+
+    // Cache line timings for audio sync
+    currentLineIndex = state.current_line_index;
+    const lines = state.current_item_lines || [];
+    cachedLineTimings = lines.map(l => l.start_ms || 0);
 
     // Audio player — update when song changes
     updateAudioPlayer(state);
@@ -90,6 +98,30 @@ document.querySelectorAll('input[name="track"]').forEach(radio => {
         audio.currentTime = currentTime;
         if (wasPlaying) audio.play();
     });
+});
+
+// ── Audio-Subtitle Sync ───────────────────────────────────
+
+document.getElementById('audio-player').addEventListener('timeupdate', () => {
+    const audio = document.getElementById('audio-player');
+    if (audio.paused || cachedLineTimings.length === 0) return;
+
+    const currentMs = audio.currentTime * 1000;
+
+    // Find the line whose start_ms is the latest one <= currentMs
+    let targetLine = 0;
+    for (let i = cachedLineTimings.length - 1; i >= 0; i--) {
+        if (cachedLineTimings[i] <= currentMs) {
+            targetLine = i;
+            break;
+        }
+    }
+
+    // Only send command if line actually changed
+    if (targetLine !== currentLineIndex) {
+        currentLineIndex = targetLine;
+        client.send({ action: 'goto_line', index: targetLine });
+    }
 });
 
 // ── Flow Navigation Rendering ─────────────────────────────
