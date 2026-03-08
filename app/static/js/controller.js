@@ -8,7 +8,7 @@ const client = new WSClient(SESSION_ID, 'controller', (msg) => {
 
 // Cache items from state for rendering line lists
 let cachedItems = [];
-let cachedLineData = {}; // index -> lines from state_sync
+let currentSongId = null;
 
 function sendCommand(action) {
     client.send({ action });
@@ -48,7 +48,51 @@ function updateControllerUI(state) {
         renderItemNav(state);
         renderLineNav(state);
     }
+
+    // Audio player — update when song changes
+    updateAudioPlayer(state);
 }
+
+// ── Audio Player ──────────────────────────────────────────
+
+function updateAudioPlayer(state) {
+    const section = document.getElementById('audio-player-section');
+    const audio = document.getElementById('audio-player');
+    const title = document.getElementById('audio-title');
+    const songId = state.current_song_id;
+
+    if (!songId) {
+        section.style.display = 'none';
+        if (!audio.paused) audio.pause();
+        currentSongId = null;
+        return;
+    }
+
+    section.style.display = 'block';
+    title.textContent = `播放：${state.current_item_label || ''}`;
+
+    // Only reload audio source when song actually changes
+    if (songId !== currentSongId) {
+        currentSongId = songId;
+        const track = document.querySelector('input[name="track"]:checked').value;
+        audio.src = `/api/v1/audio/stream/${songId}?track=${track}`;
+    }
+}
+
+// Track selector change
+document.querySelectorAll('input[name="track"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        const audio = document.getElementById('audio-player');
+        if (!currentSongId) return;
+        const currentTime = audio.currentTime;
+        const wasPlaying = !audio.paused;
+        audio.src = `/api/v1/audio/stream/${currentSongId}?track=${radio.value}`;
+        audio.currentTime = currentTime;
+        if (wasPlaying) audio.play();
+    });
+});
+
+// ── Flow Navigation Rendering ─────────────────────────────
 
 function renderItemNav(state) {
     const ul = document.getElementById('item-nav-list');
