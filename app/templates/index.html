@@ -59,6 +59,9 @@ document.getElementById('extract-btn')?.addEventListener('click', () => {
 
 document.getElementById('start-projection')?.addEventListener('click', async (e) => {
     e.preventDefault();
+    // Open windows immediately on user click to avoid popup blocker
+    const displayWin = window.open('about:blank', '_blank');
+    const controlWin = window.open('about:blank', 'projection-control', 'width=400,height=600');
     try {
         const resp = await fetch('/api/v1/projection/sessions', {
             method: 'POST',
@@ -67,9 +70,11 @@ document.getElementById('start-projection')?.addEventListener('click', async (e)
         });
         const data = await resp.json();
         const sid = data.id;
-        window.open(`/projection/display/${sid}`, '_blank');
-        window.open(`/projection/control/${sid}`, 'projection-control', 'width=400,height=600');
+        if (displayWin) displayWin.location.href = `/projection/display/${sid}`;
+        if (controlWin) controlWin.location.href = `/projection/control/${sid}`;
     } catch (err) {
+        if (displayWin) displayWin.close();
+        if (controlWin) controlWin.close();
         alert('無法建立投影工作階段：' + err.message);
     }
 });
