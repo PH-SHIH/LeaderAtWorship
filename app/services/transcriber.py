@@ -28,17 +28,22 @@ async def transcribe(audio_path: Path) -> list[dict]:
     def _transcribe():
         import mlx_whisper
 
+        # "auto" or empty string → None (let Whisper auto-detect language)
+        lang = settings.whisper_language
+        if not lang or lang.lower() == "auto":
+            lang = None
+
         logger.info(
             "Transcribing with mlx-whisper: model=%s, language=%s",
             settings.whisper_model,
-            settings.whisper_language,
+            lang or "auto-detect",
         )
 
         result = mlx_whisper.transcribe(
             str(audio_path),
             path_or_hf_repo=settings.whisper_model,
-            language=settings.whisper_language,
-            initial_prompt=settings.whisper_initial_prompt,
+            language=lang,
+            initial_prompt=settings.whisper_initial_prompt if lang in ("zh", None) else None,
             word_timestamps=True,
             condition_on_previous_text=False,  # Prevent hallucination cascading
             no_speech_threshold=0.5,

@@ -9,9 +9,9 @@
 
     <div class="card" id="input-card">
         <h2>步驟一：輸入 YouTube 連結</h2>
-        <div class="action-bar">
-            <input type="text" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." class="input-url">
-            <button class="btn btn-primary" id="start-btn">開始處理</button>
+        <div class="action-bar" style="flex-direction: column; align-items: stretch;">
+            <textarea id="youtube-url" rows="3" placeholder="貼上 YouTube 連結（支援多行，每行一個）" class="input-url" style="resize: vertical; font-size: 14px;"></textarea>
+            <button class="btn btn-primary" id="start-btn" style="align-self: flex-end;">開始處理</button>
         </div>
     </div>
 
@@ -53,39 +53,66 @@ const STATUS_LABELS = {
 };
 
 let pollTimer = null;
+let batchTasks = []; // [{taskId, url, status}]
 
-// Check for URL query parameter (from dashboard redirect)
+// Check for URL query parameters (from dashboard redirect)
 const params = new URLSearchParams(window.location.search);
 const prefilledUrl = params.get('url');
-if (prefilledUrl) {
+const prefilledUrls = params.get('urls');
+if (prefilledUrls) {
+    try {
+        const urls = JSON.parse(prefilledUrls);
+        document.getElementById('youtube-url').value = urls.join('\n');
+    } catch (e) {}
+} else if (prefilledUrl) {
     document.getElementById('youtube-url').value = prefilledUrl;
+}
+
+function parseUrls() {
+    const raw = document.getElementById('youtube-url').value.trim();
+    return raw.split(/[\n\r]+/).map(u => u.trim()).filter(u => u);
 }
 
 // Start button click
 document.getElementById('start-btn').addEventListener('click', async () => {
-    const url = document.getElementById('youtube-url').value.trim();
-    if (!url) return alert('請輸入 YouTube 連結');
+    const urls = parseUrls();
+    if (urls.length === 0) return alert('請輸入 YouTube 連結');
 
     const startBtn = document.getElementById('start-btn');
     startBtn.disabled = true;
     startBtn.textContent = '提交中...';
 
-    try {
-        const resp = await fetch('/api/v1/audio/extract', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({url})
-        });
+    batchTasks = [];
 
-        if (!resp.ok) {
-            const err = await resp.json();
-            throw new Error(err.detail || '提交失敗');
+    for (const url of urls) {
+        try {
+            const resp = await fetch('/api/v1/audio/extract', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({url})
+            });
+
+            if (!resp.ok) {
+                const err = await resp.json();
+                batchTasks.push({taskId: null, url, status: 'failed', error: err.detail || '提交失敗'});
+                continue;
+            }
+
+            const data = await resp.json();
+            batchTasks.push({taskId: data.task_id, url, status: 'pending'});
+        } catch (e) {
+            batchTasks.push({taskId: null, url, status: 'failed', error: e.message});
         }
+    }
 
-        const data = await resp.json();
-        showProgress(data.task_id);
-    } catch (e) {
-        alert('錯誤：' + e.message);
+    if (batchTasks.length === 1 && batchTasks[0].taskId) {
+        // Single URL — use original single-task progress
+        showProgress(batchTasks[0].taskId);
+    } else if (batchTasks.some(t => t.taskId)) {
+        // Multiple URLs — show batch progress
+        showBatchProgress();
+    } else {
+        alert('所有連結提交失敗');
         startBtn.disabled = false;
         startBtn.textContent = '開始處理';
     }
@@ -169,6 +196,76 @@ function updateProgress(data, taskId) {
         startBtn.disabled = false;
         startBtn.textContent = '開始處理';
     }
+}
+
+// Batch progress
+function showBatchProgress() {
+    document.getElementById('progress-card').classList.remove('hidden');
+    document.getElementById('result-actions').classList.add('hidden');
+    document.getElementById('error-text').classList.add('hidden');
+    document.getElementById('progress-title').textContent = `批次處理 ${batchTasks.length} 個連結`;
+    renderBatchStatus();
+
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(pollBatchTasks, 2000);
+    pollBatchTasks();
+}
+
+function renderBatchStatus() {
+    const statusText = document.getElementById('status-text');
+    const detailText = document.getElementById('detail-text');
+    const progressBar = document.getElementById('progress-bar');
+
+    const completed = batchTasks.filter(t => t.status === 'completed').length;
+    const failed = batchTasks.filter(t => t.status === 'failed').length;
+    const total = batchTasks.length;
+    const done = completed + failed;
+    const pct = Math.round((done / total) * 100);
+
+    progressBar.style.width = pct + '%';
+    statusText.textContent = `已完成 ${completed}/${total}` + (failed > 0 ? `（${failed} 失敗）` : '');
+
+    const lines = batchTasks.map(t => {
+        const icon = t.status === 'completed' ? '✓' : t.status === 'failed' ? '✗' : '⏳';
+        const label = t.videoTitle || t.url;
+        const extra = t.status === 'failed' && t.error ? ` — ${t.error}` : '';
+        const statusLabel = STATUS_LABELS[t.status] || t.status;
+        return `${icon} ${label} (${statusLabel}${extra})`;
+    });
+    detailText.innerHTML = lines.join('<br>');
+
+    if (done === total) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+        progressBar.classList.add(failed > 0 ? 'progress-bar-error' : 'progress-bar-done');
+
+        const startBtn = document.getElementById('start-btn');
+        startBtn.disabled = false;
+        startBtn.textContent = '開始處理';
+
+        document.getElementById('result-actions').classList.remove('hidden');
+        document.getElementById('download-link').classList.add('hidden');
+        document.getElementById('view-song-link').href = '/songs';
+        document.getElementById('view-song-link').textContent = '查看歌曲庫';
+
+        loadTaskHistory();
+    }
+}
+
+async function pollBatchTasks() {
+    for (const task of batchTasks) {
+        if (!task.taskId || task.status === 'completed' || task.status === 'failed') continue;
+
+        try {
+            const resp = await fetch(`/api/v1/audio/tasks/${task.taskId}`);
+            if (!resp.ok) continue;
+            const data = await resp.json();
+            task.status = data.status;
+            task.videoTitle = data.video_title;
+            if (data.error) task.error = data.error;
+        } catch (e) {}
+    }
+    renderBatchStatus();
 }
 
 // Task history

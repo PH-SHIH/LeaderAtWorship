@@ -36,9 +36,9 @@
 
 <div class="quick-actions">
     <h2>快速操作</h2>
-    <div class="action-bar">
-        <input type="text" id="youtube-url" placeholder="貼上 YouTube 連結..." class="input-url">
-        <button class="btn btn-primary" id="extract-btn">擷取音頻</button>
+    <div class="action-bar" style="flex-direction: column; align-items: stretch;">
+        <textarea id="youtube-url" rows="3" placeholder="貼上 YouTube 連結（支援多行，每行一個）" class="input-url" style="resize: vertical; font-size: 14px;"></textarea>
+        <button class="btn btn-primary" id="extract-btn" style="align-self: flex-end;">擷取音頻</button>
     </div>
 </div>
 {% endblock %}
@@ -46,10 +46,32 @@
 {% block scripts %}
 <script>
 document.getElementById('extract-btn')?.addEventListener('click', () => {
-    const url = document.getElementById('youtube-url').value.trim();
-    if (!url) return alert('請輸入 YouTube 連結');
-    // Redirect to audio processing page with URL pre-filled
-    window.location.href = `/audio?url=${encodeURIComponent(url)}`;
+    const raw = document.getElementById('youtube-url').value.trim();
+    if (!raw) return alert('請輸入 YouTube 連結');
+    const urls = raw.split(/[\n\r]+/).map(u => u.trim()).filter(u => u);
+    if (urls.length === 0) return alert('請輸入 YouTube 連結');
+    if (urls.length === 1) {
+        window.location.href = `/audio?url=${encodeURIComponent(urls[0])}`;
+    } else {
+        window.location.href = `/audio?urls=${encodeURIComponent(JSON.stringify(urls))}`;
+    }
+});
+
+document.getElementById('start-projection')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+        const resp = await fetch('/api/v1/projection/sessions', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        const data = await resp.json();
+        const sid = data.id;
+        window.open(`/projection/display/${sid}`, '_blank');
+        window.open(`/projection/control/${sid}`, 'projection-control', 'width=400,height=600');
+    } catch (err) {
+        alert('無法建立投影工作階段：' + err.message);
+    }
 });
 </script>
 {% endblock %}

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     # Whisper — speech-to-text (mlx-whisper on Apple Silicon)
     whisper_model: str = "mlx-community/whisper-large-v3-turbo"
-    whisper_language: str = "zh"
+    whisper_language: str = "auto"  # "auto" = auto-detect, or ISO code like "zh", "en"
     whisper_initial_prompt: str = (
         "以下是敬拜讚美詩歌的歌詞，繁體中文。"
         "常見詞彙：哈利路亞、榮耀、恩典、救贖、十字架、寶血、聖靈、"
@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     demucs_model: str = "htdemucs"
     demucs_device: str = "cpu"  # cpu recommended for Apple Silicon (MPS unreliable)
     demucs_shifts: int = 1  # equivariance shifts: 1=fast, 2-4=better quality, 10=best
-    demucs_segment: int = 10  # chunk size in seconds
+    demucs_segment: int = 7  # chunk size in seconds (htdemucs max: 7.8, must be int)
     demucs_overlap: float = 0.1  # chunk overlap ratio (0.1=fast, 0.25=quality)
     demucs_jobs: int = 8  # parallel workers (match M3 Max performance core count)
 

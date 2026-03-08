@@ -107,7 +107,12 @@ async def stream_audio(song_id: int, track: str = "original", request: Request =
         if not song:
             raise HTTPException(status_code=404, detail="Song not found")
         # Copy values before session closes
-        audio_path_str = song.vocals_path if track == "vocals" and song.vocals_path else song.audio_path
+        if track == "vocals" and song.vocals_path:
+            audio_path_str = song.vocals_path
+        elif track == "accompaniment" and song.accompaniment_path:
+            audio_path_str = song.accompaniment_path
+        else:
+            audio_path_str = song.audio_path
         if not audio_path_str:
             raise HTTPException(status_code=404, detail="No audio file for this song")
 

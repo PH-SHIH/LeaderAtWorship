@@ -20,6 +20,7 @@ class FlowItemCreate(FlowItemBase):
 
 class FlowItemResponse(FlowItemBase):
     id: int
+    song_title: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -29,6 +30,13 @@ class FlowCreate(BaseModel):
     date: datetime.date | None = None
     notes: str | None = None
     items: list[FlowItemCreate] = []
+
+
+class FlowUpdate(BaseModel):
+    name: str | None = None
+    date: datetime.date | None = None
+    notes: str | None = None
+    items: list[FlowItemCreate] | None = None
 
 
 class FlowResponse(BaseModel):

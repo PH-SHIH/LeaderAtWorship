@@ -2,6 +2,47 @@
 
 {% block title %}敬拜流程編排{% endblock %}
 
+{% block head %}
+<style>
+    .flow-card { cursor: pointer; transition: border-color 0.2s; }
+    .flow-card.selected { border-color: var(--primary, #3b82f6); border-width: 2px; }
+    .flow-editor { margin-top: 20px; }
+    .item-list { list-style: none; padding: 0; }
+    .item-list li {
+        display: flex; align-items: center; gap: 10px;
+        padding: 10px; margin: 5px 0; background: var(--bg-secondary, #f1f5f9);
+        border-radius: 6px; cursor: grab;
+    }
+    .item-list li.dragging { opacity: 0.4; }
+    .item-list li .item-drag { cursor: grab; color: #94a3b8; }
+    .item-list li .item-info { flex: 1; }
+    .item-list li .item-type { font-size: 0.75em; color: #64748b; text-transform: uppercase; }
+    .item-list li .item-title { font-weight: 500; }
+    .item-list li .btn-remove { background: none; border: none; color: #ef4444; cursor: pointer; font-size: 1.2em; }
+    .song-picker-overlay {
+        display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+        background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center;
+    }
+    .song-picker-overlay.active { display: flex; }
+    .song-picker {
+        background: var(--bg-primary, white); border-radius: 12px; padding: 24px;
+        width: 90%; max-width: 500px; max-height: 70vh; display: flex; flex-direction: column;
+    }
+    .song-picker h3 { margin: 0 0 12px; }
+    .song-picker input { width: 100%; padding: 8px 12px; margin-bottom: 12px; border: 1px solid #d1d5db; border-radius: 6px; }
+    .song-picker-list { overflow-y: auto; flex: 1; }
+    .song-picker-item {
+        padding: 10px 12px; cursor: pointer; border-radius: 6px; margin: 2px 0;
+    }
+    .song-picker-item:hover { background: var(--bg-secondary, #f1f5f9); }
+    .song-picker-item .song-artist { font-size: 0.85em; color: #64748b; }
+    .add-item-bar { display: flex; gap: 8px; margin-top: 10px; }
+    .flow-meta-edit { display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap; }
+    .flow-meta-edit input { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; }
+    .flow-meta-edit input[type="text"] { flex: 1; min-width: 200px; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="flows-page">
     <h1>敬拜流程編排</h1>
@@ -18,14 +59,50 @@
         <button class="btn btn-primary" onclick="createFlow()">建立</button>
     </div>
 
-    <div id="flows-list">
-        <p>載入中...</p>
+    <div id="flows-list"></div>
+
+    <!-- Flow Editor (shown when a flow is selected) -->
+    <div id="flow-editor" class="flow-editor hidden">
+        <div class="card">
+            <h2 id="editor-title">編輯流程</h2>
+            <div class="flow-meta-edit">
+                <input type="text" id="edit-name" placeholder="流程名稱">
+                <input type="date" id="edit-date">
+            </div>
+            <h3>歌曲順序</h3>
+            <ul class="item-list" id="item-list"></ul>
+            <div class="add-item-bar">
+                <button class="btn btn-primary" onclick="openSongPicker()">+ 加入歌曲</button>
+                <button class="btn" onclick="addCustomItem()">+ 自訂項目</button>
+            </div>
+            <div style="margin-top: 15px; display: flex; gap: 10px;">
+                <button class="btn btn-primary" onclick="saveFlow()">儲存流程</button>
+                <button class="btn" style="background: #7c3aed; color: white;" onclick="launchProjection()">啟動投影</button>
+                <button class="btn" onclick="closeEditor()">取消</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Song Picker Modal -->
+<div class="song-picker-overlay" id="song-picker-overlay">
+    <div class="song-picker">
+        <h3>選擇歌曲</h3>
+        <input type="text" id="song-search" placeholder="搜尋歌曲..." oninput="searchSongs(this.value)">
+        <div class="song-picker-list" id="song-picker-list"></div>
+        <button class="btn" style="margin-top: 10px;" onclick="closeSongPicker()">取消</button>
     </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+let currentFlowId = null;
+let editItems = [];
+let allSongs = [];
+
+// ── Flow List ──────────────────────────────────────────────
+
 async function loadFlows() {
     const resp = await fetch('/api/v1/flows');
     const flows = await resp.json();
@@ -37,12 +114,22 @@ async function loadFlows() {
     }
 
     list.innerHTML = flows.map(f => `
-        <div class="card">
-            <h3>${f.name}</h3>
+        <div class="card flow-card ${currentFlowId === f.id ? 'selected' : ''}"
+             onclick="selectFlow(${f.id})">
+            <h3>${escapeHtml(f.name)}</h3>
             <p>${f.date || '未設定日期'} | ${f.items?.length || 0} 個項目</p>
-            <p>${f.notes || ''}</p>
+            ${f.items.length > 0 ? `<p style="color: #64748b; font-size: 0.9em;">${f.items.map(i => escapeHtml(i.song_title || i.label || i.item_type)).join(' → ')}</p>` : ''}
+            <p>${escapeHtml(f.notes || '')}</p>
+            <button class="btn" style="margin-top: 8px; font-size: 0.85em; color: #ef4444;"
+                    onclick="event.stopPropagation(); deleteFlow(${f.id})">刪除</button>
         </div>
     `).join('');
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 function showCreateForm() {
@@ -56,15 +143,236 @@ async function createFlow() {
 
     if (!name) return alert('請輸入流程名稱');
 
-    await fetch('/api/v1/flows', {
+    const resp = await fetch('/api/v1/flows', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({name, date: date || null, notes: notes || null})
     });
+    const flow = await resp.json();
 
     document.getElementById('create-flow-form').classList.add('hidden');
+    document.getElementById('flow-name').value = '';
+    document.getElementById('flow-date').value = '';
+    document.getElementById('flow-notes').value = '';
+
+    await loadFlows();
+    selectFlow(flow.id);
+}
+
+async function deleteFlow(flowId) {
+    if (!confirm('確定要刪除此流程？')) return;
+    await fetch(`/api/v1/flows/${flowId}`, { method: 'DELETE' });
+    if (currentFlowId === flowId) closeEditor();
     loadFlows();
 }
+
+// ── Flow Editor ────────────────────────────────────────────
+
+async function selectFlow(flowId) {
+    currentFlowId = flowId;
+
+    const resp = await fetch(`/api/v1/flows/${flowId}`);
+    const flow = await resp.json();
+
+    document.getElementById('edit-name').value = flow.name;
+    document.getElementById('edit-date').value = flow.date || '';
+    document.getElementById('editor-title').textContent = `編輯：${flow.name}`;
+
+    editItems = flow.items.map(item => ({
+        song_id: item.song_id,
+        item_type: item.item_type,
+        label: item.label,
+        song_title: item.song_title,
+        transition_note: item.transition_note,
+        duration_seconds: item.duration_seconds,
+    }));
+
+    renderItemList();
+    document.getElementById('flow-editor').classList.remove('hidden');
+    loadFlows();
+}
+
+function closeEditor() {
+    currentFlowId = null;
+    document.getElementById('flow-editor').classList.add('hidden');
+    loadFlows();
+}
+
+function renderItemList() {
+    const ul = document.getElementById('item-list');
+    ul.innerHTML = editItems.map((item, i) => `
+        <li draggable="true" data-index="${i}"
+            ondragstart="dragStart(event)" ondragover="dragOver(event)"
+            ondrop="drop(event)" ondragend="dragEnd(event)">
+            <span class="item-drag">&#9776;</span>
+            <div class="item-info">
+                <span class="item-type">${escapeHtml(item.item_type)}</span>
+                <span class="item-title">${escapeHtml(item.song_title || item.label || '(未命名)')}</span>
+            </div>
+            <button class="btn-remove" onclick="removeItem(${i})" title="移除">&times;</button>
+        </li>
+    `).join('');
+}
+
+function removeItem(index) {
+    editItems.splice(index, 1);
+    renderItemList();
+}
+
+function addCustomItem() {
+    const label = prompt('項目名稱（如：禱告、讀經、公告）：');
+    if (!label) return;
+    const type = prompt('項目類型（prayer/reading/announcement/other）：', 'other') || 'other';
+    editItems.push({ song_id: null, item_type: type, label, song_title: null });
+    renderItemList();
+}
+
+async function saveFlow() {
+    const items = editItems.map((item, i) => ({
+        song_id: item.song_id,
+        position: i + 1,
+        item_type: item.item_type,
+        label: item.label,
+        transition_note: item.transition_note,
+        duration_seconds: item.duration_seconds,
+    }));
+
+    const body = {
+        name: document.getElementById('edit-name').value,
+        date: document.getElementById('edit-date').value || null,
+        items,
+    };
+
+    const resp = await fetch(`/api/v1/flows/${currentFlowId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+
+    if (resp.ok) {
+        const flow = await resp.json();
+        editItems = flow.items.map(item => ({
+            song_id: item.song_id,
+            item_type: item.item_type,
+            label: item.label,
+            song_title: item.song_title,
+            transition_note: item.transition_note,
+            duration_seconds: item.duration_seconds,
+        }));
+        renderItemList();
+        loadFlows();
+    } else {
+        alert('儲存失敗');
+    }
+}
+
+// ── Drag & Drop ────────────────────────────────────────────
+
+let dragIndex = null;
+
+function dragStart(e) {
+    dragIndex = parseInt(e.currentTarget.dataset.index);
+    e.currentTarget.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+}
+
+function dragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function drop(e) {
+    e.preventDefault();
+    const targetIndex = parseInt(e.currentTarget.dataset.index);
+    if (dragIndex === null || dragIndex === targetIndex) return;
+    const [moved] = editItems.splice(dragIndex, 1);
+    editItems.splice(targetIndex, 0, moved);
+    dragIndex = null;
+    renderItemList();
+}
+
+function dragEnd(e) {
+    e.currentTarget.classList.remove('dragging');
+    dragIndex = null;
+}
+
+// ── Song Picker ────────────────────────────────────────────
+
+async function openSongPicker() {
+    const overlay = document.getElementById('song-picker-overlay');
+    overlay.classList.add('active');
+    document.getElementById('song-search').value = '';
+
+    if (allSongs.length === 0) {
+        const resp = await fetch('/api/v1/songs');
+        allSongs = await resp.json();
+    }
+    renderSongList(allSongs);
+}
+
+function closeSongPicker() {
+    document.getElementById('song-picker-overlay').classList.remove('active');
+}
+
+function searchSongs(query) {
+    const q = query.toLowerCase();
+    const filtered = allSongs.filter(s =>
+        s.title.toLowerCase().includes(q) ||
+        (s.artist && s.artist.toLowerCase().includes(q))
+    );
+    renderSongList(filtered);
+}
+
+function renderSongList(songs) {
+    const list = document.getElementById('song-picker-list');
+    if (songs.length === 0) {
+        list.innerHTML = '<p style="color: #64748b;">沒有找到歌曲</p>';
+        return;
+    }
+    list.innerHTML = songs.map(s => `
+        <div class="song-picker-item" onclick="pickSong(${s.id}, this)" data-title="${escapeHtml(s.title)}">
+            <div>${escapeHtml(s.title)}</div>
+            ${s.artist ? `<div class="song-artist">${escapeHtml(s.artist)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function pickSong(songId, el) {
+    const songTitle = el.dataset.title;
+    editItems.push({
+        song_id: songId,
+        item_type: 'song',
+        label: null,
+        song_title: songTitle,
+    });
+    closeSongPicker();
+    renderItemList();
+}
+
+// ── Launch Projection ──────────────────────────────────────
+
+async function launchProjection() {
+    if (!currentFlowId) return alert('請先選擇一個流程');
+
+    // Save current edits first
+    await saveFlow();
+
+    try {
+        const resp = await fetch('/api/v1/projection/sessions', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ flow_id: currentFlowId })
+        });
+        const data = await resp.json();
+        const sid = data.id;
+        window.open(`/projection/display/${sid}`, '_blank');
+        window.open(`/projection/control/${sid}`, 'projection-control', 'width=400,height=600');
+    } catch (err) {
+        alert('無法啟動投影：' + err.message);
+    }
+}
+
+// ── Init ───────────────────────────────────────────────────
 
 loadFlows();
 </script>
