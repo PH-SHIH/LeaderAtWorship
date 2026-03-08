@@ -5,7 +5,7 @@ from app.config import settings
 from app.database import async_session_factory
 from app.models.song import Song
 from app.models.subtitle import SubtitleFile, SubtitleLine
-from app.services import youtube, separator, transcriber
+from app.services import youtube, separator, transcriber, lyrics_fetcher, lyrics_aligner
 from app.services.subtitle_generator import generate_srt
 from app.tasks.task_store import task_store
 from app.utils.deps_check import MLDependencyError, check_demucs, check_whisper
@@ -87,6 +87,120 @@ async def run_audio_pipeline(
             _fmt_elapsed(timings["transcription"]),
         )
 
+        # Step 3.5: Lyrics alignment (non-fatal — failure keeps original Whisper text)
+        alignment_source = None
+        alignment_confidence = None
+        alignment_matched = None
+        alignment_total = None
+        alignment_algorithm = None
+        subtitle_source = "whisper"
+
+        if settings.alignment_enabled:
+            try:
+                task_store[task_id].update({"status": "aligning", "progress": 87})
+                t0 = time.perf_counter()
+
+                fetch_result = await lyrics_fetcher.fetch_lyrics(
+                    dl_result.title, dl_result.artist
+                )
+
+                if fetch_result:
+                    alignment = lyrics_aligner.align(
+                        segments,
+                        fetch_result.lines,
+                        anchor_threshold=settings.alignment_anchor_threshold,
+                        logprob_threshold=settings.alignment_logprob_threshold,
+                        min_anchor_ratio=settings.alignment_min_anchor_ratio,
+                        match_threshold=settings.alignment_match_threshold,
+                        phantom_threshold_ms=settings.alignment_phantom_threshold_ms,
+                        output_traditional=settings.alignment_output_traditional,
+                    )
+
+                    # Quality gate
+                    total_ref = alignment.gt_lines_total
+                    match_ratio = alignment.matched_count / total_ref if total_ref else 0
+
+                    if (
+                        alignment.average_confidence >= settings.alignment_min_confidence
+                        and match_ratio >= settings.alignment_min_match_ratio
+                    ):
+                        # Replace segments with aligned output
+                        segments = [
+                            {
+                                "start_ms": aseg.start_ms,
+                                "end_ms": aseg.end_ms,
+                                "text": aseg.text,
+                                "text_secondary": aseg.text_secondary,
+                                "confidence": aseg.confidence,
+                                "source_type": aseg.source_type,
+                            }
+                            for aseg in alignment.segments
+                        ]
+                        subtitle_source = "whisper+aligned"
+                        alignment_source = fetch_result.provider
+                        alignment_confidence = alignment.average_confidence
+                        alignment_matched = alignment.matched_count
+                        alignment_total = total_ref
+                        alignment_algorithm = alignment.algorithm
+
+                        # Optional BPM snap
+                        if settings.alignment_bpm_snap:
+                            try:
+                                from app.services.lyrics_aligner import snap_to_beats, AlignedSegment
+
+                                snap_segs = [
+                                    AlignedSegment(
+                                        start_ms=s["start_ms"],
+                                        end_ms=s["end_ms"],
+                                        text=s["text"],
+                                        text_secondary=s.get("text_secondary"),
+                                        confidence=s.get("confidence", 0.0),
+                                        gt_index=None,
+                                        source_type=s.get("source_type", ""),
+                                    )
+                                    for s in segments
+                                ]
+                                snap_segs = snap_to_beats(
+                                    snap_segs,
+                                    str(dl_result.audio_path),
+                                    tolerance_ms=settings.alignment_bpm_snap_tolerance_ms,
+                                )
+                                segments = [
+                                    {
+                                        "start_ms": s.start_ms,
+                                        "end_ms": s.end_ms,
+                                        "text": s.text,
+                                        "text_secondary": s.text_secondary,
+                                        "confidence": s.confidence,
+                                        "source_type": s.source_type,
+                                    }
+                                    for s in snap_segs
+                                ]
+                            except Exception:
+                                logger.warning("BPM snap failed (non-fatal)", exc_info=True)
+
+                        logger.info(
+                            "Alignment accepted (%s): %d/%d matched (%.0f%% confidence)",
+                            alignment.algorithm,
+                            alignment.matched_count,
+                            total_ref,
+                            alignment.average_confidence * 100,
+                        )
+                    else:
+                        logger.info(
+                            "Alignment rejected (quality gate): confidence=%.2f, "
+                            "match_ratio=%.2f — keeping original Whisper text",
+                            alignment.average_confidence,
+                            match_ratio,
+                        )
+                else:
+                    logger.info("No lyrics found online — keeping original Whisper text")
+
+                timings["alignment"] = time.perf_counter() - t0
+            except Exception:
+                logger.warning("Lyrics alignment failed (non-fatal)", exc_info=True)
+                timings["alignment"] = 0
+
         # Step 4: Generate SRT file
         task_store[task_id].update({"status": "generating", "progress": 90})
         srt_filename = f"{dl_result.video_id}.srt"
@@ -111,8 +225,13 @@ async def run_audio_pipeline(
                     song_id=song.id,
                     filename=srt_filename,
                     format="srt",
-                    source="whisper",
+                    source=subtitle_source,
                     file_path=str(output_path),
+                    alignment_source=alignment_source,
+                    alignment_confidence=alignment_confidence,
+                    alignment_matched=alignment_matched,
+                    alignment_total=alignment_total,
+                    alignment_algorithm=alignment_algorithm,
                 )
                 session.add(subtitle_file)
                 await session.flush()
@@ -124,6 +243,9 @@ async def run_audio_pipeline(
                         start_ms=seg["start_ms"],
                         end_ms=seg["end_ms"],
                         text=seg["text"],
+                        text_secondary=seg.get("text_secondary"),
+                        confidence=seg.get("confidence"),
+                        source_type=seg.get("source_type"),
                     )
                     session.add(line)
 
@@ -133,17 +255,21 @@ async def run_audio_pipeline(
         total_elapsed = time.perf_counter() - pipeline_start
         timings["total"] = total_elapsed
 
+        alignment_time = timings.get("alignment", 0)
         logger.info(
-            "Pipeline complete for '%s': total=%s (download=%s, separation=%s, transcription=%s) "
-            "→ Song #%d, SubtitleFile #%d (%d lines)",
+            "Pipeline complete for '%s': total=%s "
+            "(download=%s, separation=%s, transcription=%s, alignment=%s) "
+            "→ Song #%d, SubtitleFile #%d (%d lines, source=%s)",
             dl_result.title,
             _fmt_elapsed(total_elapsed),
             _fmt_elapsed(timings["download"]),
             _fmt_elapsed(timings["separation"]),
             _fmt_elapsed(timings["transcription"]),
+            _fmt_elapsed(alignment_time),
             song_id,
             result_id,
             len(segments),
+            subtitle_source,
         )
 
         task_store[task_id].update(

@@ -52,6 +52,7 @@ async def transcribe(audio_path: Path) -> list[dict]:
                 "start_ms": int(seg["start"] * 1000),
                 "end_ms": int(seg["end"] * 1000),
                 "text": seg["text"].strip(),
+                "avg_logprob": seg.get("avg_logprob"),
             }
             for seg in result["segments"]
         ]

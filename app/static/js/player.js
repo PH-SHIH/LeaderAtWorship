@@ -67,7 +67,8 @@ function renderSongHeader(song) {
 function renderSubtitleLines(lines) {
     const container = document.getElementById('subtitle-lines');
     container.innerHTML = lines.map((line, i) => `
-        <div class="subtitle-line" data-index="${i}" data-start-ms="${line.start_ms}">
+        <div class="subtitle-line" data-index="${i}" data-start-ms="${line.start_ms}"
+             data-source="${line.source_type || ''}">
             <span class="line-time">${formatTime(line.start_ms)}</span>
             <span class="line-text">${line.text}</span>
             ${line.text_secondary ? `<span class="line-text-secondary">${line.text_secondary}</span>` : ''}
@@ -91,6 +92,25 @@ function renderLyrics(lyrics) {
     const primary = lyrics.find(l => l.is_primary) || lyrics[0];
     document.getElementById('lyrics-content').textContent = primary.content;
     document.getElementById('lyrics-section').classList.remove('hidden');
+}
+
+function renderAlignmentBadge(subtitleFile) {
+    const info = document.getElementById('alignment-info');
+    if (!info || !subtitleFile.alignment_source) return;
+
+    const confidence = subtitleFile.alignment_confidence || 0;
+    const matched = subtitleFile.alignment_matched || 0;
+    const total = subtitleFile.alignment_total || 0;
+    const pct = Math.round(confidence * 100);
+
+    let badgeClass = 'badge-low';
+    if (pct >= 80) badgeClass = 'badge-good';
+    else if (pct >= 60) badgeClass = 'badge-ok';
+
+    const algo = subtitleFile.alignment_algorithm;
+    const algoLabel = algo === 'anchor' ? '錨點對齊' : '逐行匹配';
+    info.innerHTML = `<span class="alignment-badge ${badgeClass}">${algoLabel} ${pct}% (${matched}/${total} 行匹配)</span>`;
+    info.classList.remove('hidden');
 }
 
 // ── Subtitle Sync ───────────────────────────────────────────
@@ -254,8 +274,10 @@ async function init() {
     if (subResp.ok) {
         const subtitleFiles = await subResp.json();
         if (subtitleFiles.length > 0 && subtitleFiles[0].lines.length > 0) {
-            subtitleLines = subtitleFiles[0].lines.sort((a, b) => a.start_ms - b.start_ms);
+            const subFile = subtitleFiles[0];
+            subtitleLines = subFile.lines.sort((a, b) => a.start_ms - b.start_ms);
             renderSubtitleLines(subtitleLines);
+            renderAlignmentBadge(subFile);
             document.getElementById('subtitle-section').classList.remove('hidden');
             // Hide lyrics section when we have timed subtitles
             document.getElementById('lyrics-section').classList.add('hidden');

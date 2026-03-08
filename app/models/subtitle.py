@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import ForeignKey, String, Text, func
+from sqlalchemy import Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -16,6 +16,13 @@ class SubtitleFile(Base):
     source: Mapped[str] = mapped_column(String(50))  # manual, whisper, imported
     file_path: Mapped[str] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(default=func.now())
+
+    # Lyrics alignment metadata
+    alignment_source: Mapped[str | None] = mapped_column(String(50))  # "syncedlyrics" | None
+    alignment_confidence: Mapped[float | None] = mapped_column(Float)
+    alignment_matched: Mapped[int | None] = mapped_column(Integer)
+    alignment_total: Mapped[int | None] = mapped_column(Integer)
+    alignment_algorithm: Mapped[str | None] = mapped_column(String(20))  # anchor | greedy_fallback
 
     song: Mapped["Song | None"] = relationship(back_populates="subtitle_files")
     lines: Mapped[list["SubtitleLine"]] = relationship(
@@ -33,6 +40,8 @@ class SubtitleLine(Base):
     end_ms: Mapped[int]
     text: Mapped[str] = mapped_column(Text)
     text_secondary: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[float | None] = mapped_column(Float)
+    source_type: Mapped[str | None] = mapped_column(String(20))  # anchor|interpolated|extrapolated|phantom
 
     subtitle_file: Mapped["SubtitleFile"] = relationship(back_populates="lines")
 
