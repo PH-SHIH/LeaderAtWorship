@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}LeaderAtWorship - Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <h1>LeaderAtWorship</h1>
+    <p class="subtitle">敬拜字幕生成與即時投影控制工具</p>
+
+    <div class="card-grid">
+        <div class="card">
+            <h2>歌曲庫</h2>
+            <p>管理詩歌與歌詞，支援多語言</p>
+            <a href="/songs" class="btn">進入歌曲庫</a>
+        </div>
+
+        <div class="card">
+            <h2>敬拜流程</h2>
+            <p>編排詩歌順序、設定轉場</p>
+            <a href="/flows" class="btn">編排流程</a>
+        </div>
+
+        <div class="card">
+            <h2>音頻處理</h2>
+            <p>YouTube 音頻擷取、人聲分離、自動轉錄</p>
+            <a href="/audio" class="btn">音頻工具</a>
+        </div>
+
+        <div class="card">
+            <h2>即時投影</h2>
+            <p>即時切換字幕畫面，支援遠端操控</p>
+            <a href="#" class="btn" id="start-projection">啟動投影</a>
+        </div>
+    </div>
+</div>
+
+<div class="quick-actions">
+    <h2>快速操作</h2>
+    <div class="action-bar">
+        <input type="text" id="youtube-url" placeholder="貼上 YouTube 連結..." class="input-url">
+        <button class="btn btn-primary" id="extract-btn">擷取音頻</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('extract-btn')?.addEventListener('click', () => {
+    const url = document.getElementById('youtube-url').value.trim();
+    if (!url) return alert('請輸入 YouTube 連結');
+    // Redirect to audio processing page with URL pre-filled
+    window.location.href = `/audio?url=${encodeURIComponent(url)}`;
+});
+</script>
+{% endblock %}

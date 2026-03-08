@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}音頻處理 - LeaderAtWorship{% endblock %}
+
+{% block content %}
+<div class="audio-process">
+    <h1>音頻處理</h1>
+    <p class="page-subtitle">從 YouTube 影片自動擷取歌詞字幕</p>
+
+    <div class="card" id="input-card">
+        <h2>步驟一：輸入 YouTube 連結</h2>
+        <div class="action-bar">
+            <input type="text" id="youtube-url" placeholder="https://www.youtube.com/watch?v=..." class="input-url">
+            <button class="btn btn-primary" id="start-btn">開始處理</button>
+        </div>
+    </div>
+
+    <div class="card hidden" id="progress-card">
+        <h2 id="progress-title">處理中...</h2>
+        <div class="progress-bar-container">
+            <div class="progress-bar" id="progress-bar" style="width: 0%"></div>
+        </div>
+        <p id="status-text">準備中...</p>
+        <p id="detail-text" class="text-muted"></p>
+        <p id="error-text" class="text-error hidden"></p>
+        <div id="result-actions" class="hidden">
+            <a id="download-link" class="btn btn-primary" href="#">下載 SRT 字幕檔</a>
+            <a id="view-song-link" class="btn" href="/songs">查看歌曲庫</a>
+        </div>
+    </div>
+
+    <div class="card" id="history-card">
+        <h2>處理紀錄</h2>
+        <div id="task-history">
+            <p class="text-muted">載入中...</p>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const STATUS_LABELS = {
+    pending: '排隊中...',
+    downloading: '下載 YouTube 音訊...',
+    separating: '人聲分離中...',
+    transcribing: '語音轉錄中...',
+    generating: '生成字幕檔...',
+    saving: '儲存結果...',
+    completed: '處理完成！',
+    failed: '處理失敗',
+};
+
+let pollTimer = null;
+
+// Check for URL query parameter (from dashboard redirect)
+const params = new URLSearchParams(window.location.search);
+const prefilledUrl = params.get('url');
+if (prefilledUrl) {
+    document.getElementById('youtube-url').value = prefilledUrl;
+}
+
+// Start button click
+document.getElementById('start-btn').addEventListener('click', async () => {
+    const url = document.getElementById('youtube-url').value.trim();
+    if (!url) return alert('請輸入 YouTube 連結');
+
+    const startBtn = document.getElementById('start-btn');
+    startBtn.disabled = true;
+    startBtn.textContent = '提交中...';
+
+    try {
+        const resp = await fetch('/api/v1/audio/extract', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({url})
+        });
+
+        if (!resp.ok) {
+            const err = await resp.json();
+            throw new Error(err.detail || '提交失敗');
+        }
+
+        const data = await resp.json();
+        showProgress(data.task_id);
+    } catch (e) {
+        alert('錯誤：' + e.message);
+        startBtn.disabled = false;
+        startBtn.textContent = '開始處理';
+    }
+});
+
+function showProgress(taskId) {
+    document.getElementById('progress-card').classList.remove('hidden');
+    document.getElementById('result-actions').classList.add('hidden');
+    document.getElementById('error-text').classList.add('hidden');
+    document.getElementById('progress-bar').style.width = '0%';
+    document.getElementById('status-text').textContent = STATUS_LABELS['pending'];
+    document.getElementById('detail-text').textContent = '';
+
+    // Start polling
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(() => pollTask(taskId), 2000);
+    pollTask(taskId); // immediate first poll
+}
+
+async function pollTask(taskId) {
+    try {
+        const resp = await fetch(`/api/v1/audio/tasks/${taskId}`);
+        if (!resp.ok) return;
+
+        const data = await resp.json();
+        updateProgress(data, taskId);
+    } catch (e) {
+        console.error('Poll error:', e);
+    }
+}
+
+function updateProgress(data, taskId) {
+    const progressBar = document.getElementById('progress-bar');
+    const statusText = document.getElementById('status-text');
+    const detailText = document.getElementById('detail-text');
+    const errorText = document.getElementById('error-text');
+    const progressTitle = document.getElementById('progress-title');
+
+    progressBar.style.width = data.progress + '%';
+    statusText.textContent = STATUS_LABELS[data.status] || data.status;
+
+    if (data.video_title) {
+        progressTitle.textContent = data.video_title;
+    }
+
+    if (data.detail) {
+        detailText.textContent = data.detail;
+    }
+
+    if (data.status === 'completed') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+
+        progressBar.classList.add('progress-bar-done');
+        document.getElementById('result-actions').classList.remove('hidden');
+        document.getElementById('download-link').href = `/api/v1/audio/tasks/${taskId}/download`;
+
+        // Re-enable the start button for another task
+        const startBtn = document.getElementById('start-btn');
+        startBtn.disabled = false;
+        startBtn.textContent = '開始處理';
+
+        // Refresh task history
+        loadTaskHistory();
+    }
+
+    if (data.status === 'failed') {
+        clearInterval(pollTimer);
+        pollTimer = null;
+
+        progressBar.classList.add('progress-bar-error');
+        errorText.textContent = '錯誤：' + (data.error || '未知錯誤');
+        errorText.classList.remove('hidden');
+
+        const startBtn = document.getElementById('start-btn');
+        startBtn.disabled = false;
+        startBtn.textContent = '開始處理';
+    }
+}
+
+// Task history
+async function loadTaskHistory() {
+    try {
+        const resp = await fetch('/api/v1/audio/tasks');
+        if (!resp.ok) return;
+
+        const tasks = await resp.json();
+        const container = document.getElementById('task-history');
+
+        if (tasks.length === 0) {
+            container.innerHTML = '<p class="text-muted">尚無處理紀錄</p>';
+            return;
+        }
+
+        container.innerHTML = tasks.map(t => `
+            <div class="history-item ${t.status}">
+                <div class="history-info">
+                    <strong>${t.video_title || '未知影片'}</strong>
+                    <span class="history-status">${STATUS_LABELS[t.status] || t.status}</span>
+                </div>
+                <div class="history-actions">
+                    ${t.status === 'completed'
+                        ? `<a href="/api/v1/audio/tasks/${t.task_id}/download" class="btn btn-sm">下載 SRT</a>`
+                        : ''
+                    }
+                    ${t.status === 'failed'
+                        ? `<span class="text-error text-sm">${t.error || ''}</span>`
+                        : ''
+                    }
+                </div>
+            </div>
+        `).join('');
+    } catch (e) {
+        console.error('Failed to load task history:', e);
+    }
+}
+
+// Load history on page load
+loadTaskHistory();
+</script>
+{% endblock %}

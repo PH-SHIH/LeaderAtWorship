@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}歌曲庫{% endblock %}
+
+{% block content %}
+<div class="songs-page">
+    <h1>歌曲庫</h1>
+
+    <div class="search-bar">
+        <input type="text" id="search-input" placeholder="搜尋詩歌..." class="input-search">
+        <button class="btn" onclick="searchSongs()">搜尋</button>
+        <button class="btn btn-primary" onclick="showAddForm()">新增詩歌</button>
+    </div>
+
+    <div id="add-song-form" class="hidden card" style="margin: 20px 0;">
+        <h3>新增詩歌</h3>
+        <input type="text" id="song-title" placeholder="詩歌名稱" style="width: 100%; margin: 5px 0; padding: 8px;">
+        <input type="text" id="song-artist" placeholder="作者/歌手" style="width: 100%; margin: 5px 0; padding: 8px;">
+        <input type="text" id="song-key" placeholder="調性 (例: G, Bb)" style="width: 100%; margin: 5px 0; padding: 8px;">
+        <textarea id="song-lyrics" rows="6" placeholder="歌詞..." style="width: 100%; margin: 5px 0; padding: 8px;"></textarea>
+        <button class="btn btn-primary" onclick="addSong()">儲存</button>
+    </div>
+
+    <div id="songs-list" class="song-list">
+        <p>載入中...</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadSongs(query = '') {
+    const url = query ? `/api/v1/songs?q=${encodeURIComponent(query)}` : '/api/v1/songs';
+    const resp = await fetch(url);
+    const songs = await resp.json();
+    const list = document.getElementById('songs-list');
+
+    if (songs.length === 0) {
+        list.innerHTML = '<p>尚無詩歌，點擊「新增詩歌」開始</p>';
+        return;
+    }
+
+    list.innerHTML = songs.map(s => `
+        <div class="card song-card">
+            <h3>${s.title}</h3>
+            <p>${s.artist || ''} ${s.key_signature ? '| 調性: ' + s.key_signature : ''}</p>
+        </div>
+    `).join('');
+}
+
+function searchSongs() {
+    const q = document.getElementById('search-input').value;
+    loadSongs(q);
+}
+
+function showAddForm() {
+    document.getElementById('add-song-form').classList.toggle('hidden');
+}
+
+async function addSong() {
+    const title = document.getElementById('song-title').value;
+    const artist = document.getElementById('song-artist').value;
+    const key_signature = document.getElementById('song-key').value;
+    const lyrics = document.getElementById('song-lyrics').value;
+
+    if (!title) return alert('請輸入詩歌名稱');
+
+    const resp = await fetch('/api/v1/songs', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({title, artist: artist || null, key_signature: key_signature || null})
+    });
+    const song = await resp.json();
+
+    if (lyrics) {
+        await fetch(`/api/v1/songs/${song.id}/lyrics`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({language: 'zh', content: lyrics, is_primary: true})
+        });
+    }
+
+    document.getElementById('add-song-form').classList.add('hidden');
+    loadSongs();
+}
+
+loadSongs();
+</script>
+{% endblock %}

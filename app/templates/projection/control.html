@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}投影控制台{% endblock %}
+
+{% block head %}
+<style>
+    .control-panel { max-width: 800px; margin: 0 auto; }
+    .control-buttons { display: flex; gap: 10px; margin: 20px 0; flex-wrap: wrap; }
+    .control-buttons button { padding: 12px 24px; font-size: 16px; cursor: pointer; }
+    .current-display { background: #1a1a2e; color: white; padding: 40px; text-align: center; border-radius: 8px; min-height: 120px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+    .current-display .main-text { font-size: 28px; }
+    .current-display .secondary-text { font-size: 20px; color: #aaa; margin-top: 10px; }
+    .status { color: #888; font-size: 14px; margin-top: 10px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="control-panel">
+    <h1>投影控制台</h1>
+    <p class="status" id="connection-status">連線中...</p>
+
+    <div class="current-display">
+        <div class="main-text" id="current-text">等待中...</div>
+        <div class="secondary-text" id="current-text-secondary"></div>
+    </div>
+
+    <div class="control-buttons">
+        <button class="btn" onclick="sendCommand('prev_item')">上一首</button>
+        <button class="btn" onclick="sendCommand('prev_line')">上一行</button>
+        <button class="btn btn-primary" onclick="sendCommand('next_line')">下一行</button>
+        <button class="btn" onclick="sendCommand('next_item')">下一首</button>
+        <button class="btn btn-danger" onclick="sendCommand('toggle_blank')">黑幕</button>
+    </div>
+
+    <div>
+        <h3>手動輸入</h3>
+        <textarea id="manual-text" rows="3" placeholder="手動輸入字幕文字..." style="width: 100%;"></textarea>
+        <button class="btn" onclick="sendText()">送出文字</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const SESSION_ID = {{ session_id }};
+</script>
+<script src="{{ url_for('static', path='js/controller.js') }}"></script>
+{% endblock %}

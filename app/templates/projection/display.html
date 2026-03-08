@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>投影顯示</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='css/projection.css') }}">
+</head>
+<body class="projection-display">
+    <div id="subtitle-container">
+        <div id="subtitle-text" class="subtitle-line"></div>
+        <div id="subtitle-text-secondary" class="subtitle-line secondary"></div>
+    </div>
+    <div id="blank-overlay" class="hidden"></div>
+
+    <script>
+        const SESSION_ID = {{ session_id }};
+    </script>
+    <script src="{{ url_for('static', path='js/projection.js') }}"></script>
+</body>
+</html>
