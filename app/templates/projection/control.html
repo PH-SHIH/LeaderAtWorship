@@ -4,13 +4,31 @@
 
 {% block head %}
 <style>
-    .control-panel { max-width: 800px; margin: 0 auto; }
+    .control-panel { max-width: 900px; margin: 0 auto; }
     .control-buttons { display: flex; gap: 10px; margin: 20px 0; flex-wrap: wrap; }
     .control-buttons button { padding: 12px 24px; font-size: 16px; cursor: pointer; }
-    .current-display { background: #1a1a2e; color: white; padding: 40px; text-align: center; border-radius: 8px; min-height: 120px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
+    .current-display {
+        background: #1a1a2e; color: white; padding: 40px; text-align: center;
+        border-radius: 8px; min-height: 120px; display: flex; align-items: center;
+        justify-content: center; flex-direction: column;
+    }
     .current-display .main-text { font-size: 28px; }
     .current-display .secondary-text { font-size: 20px; color: #aaa; margin-top: 10px; }
     .status { color: #888; font-size: 14px; margin-top: 10px; }
+    .flow-nav { display: flex; gap: 16px; margin-top: 20px; }
+    .flow-nav .item-list-panel { flex: 0 0 220px; }
+    .flow-nav .line-list-panel { flex: 1; }
+    .nav-list { list-style: none; padding: 0; margin: 0; max-height: 50vh; overflow-y: auto; }
+    .nav-list li {
+        padding: 8px 12px; cursor: pointer; border-radius: 6px; margin: 2px 0;
+        font-size: 14px; transition: background 0.15s;
+    }
+    .nav-list li:hover { background: var(--bg-secondary, #f1f5f9); }
+    .nav-list li.active { background: var(--primary, #3b82f6); color: white; }
+    .nav-list li .item-type { font-size: 11px; color: #94a3b8; text-transform: uppercase; }
+    .nav-list li.active .item-type { color: rgba(255,255,255,0.7); }
+    .position-info { font-size: 13px; color: #64748b; margin-top: 8px; }
+    .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #475569; }
 </style>
 {% endblock %}
 
@@ -23,16 +41,28 @@
         <div class="main-text" id="current-text">等待中...</div>
         <div class="secondary-text" id="current-text-secondary"></div>
     </div>
+    <div class="position-info" id="position-info"></div>
 
     <div class="control-buttons">
         <button class="btn" onclick="sendCommand('prev_item')">上一首</button>
         <button class="btn" onclick="sendCommand('prev_line')">上一行</button>
         <button class="btn btn-primary" onclick="sendCommand('next_line')">下一行</button>
         <button class="btn" onclick="sendCommand('next_item')">下一首</button>
-        <button class="btn btn-danger" onclick="sendCommand('toggle_blank')">黑幕</button>
+        <button class="btn" style="background: #1a1a2e; color: white;" onclick="sendCommand('toggle_blank')">黑幕</button>
     </div>
 
-    <div>
+    <div class="flow-nav" id="flow-nav" style="display: none;">
+        <div class="item-list-panel">
+            <div class="panel-title">流程項目</div>
+            <ul class="nav-list" id="item-nav-list"></ul>
+        </div>
+        <div class="line-list-panel">
+            <div class="panel-title" id="line-panel-title">字幕行</div>
+            <ul class="nav-list" id="line-nav-list"></ul>
+        </div>
+    </div>
+
+    <div style="margin-top: 20px;">
         <h3>手動輸入</h3>
         <textarea id="manual-text" rows="3" placeholder="手動輸入字幕文字..." style="width: 100%;"></textarea>
         <button class="btn" onclick="sendText()">送出文字</button>
@@ -44,5 +74,6 @@
 <script>
     const SESSION_ID = {{ session_id }};
 </script>
+<script src="{{ url_for('static', path='js/ws-client.js') }}"></script>
 <script src="{{ url_for('static', path='js/controller.js') }}"></script>
 {% endblock %}

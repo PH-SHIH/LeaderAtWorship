@@ -26,10 +26,12 @@ def _clean_youtube_title(title: str) -> str:
     Examples:
         "林佳蓉 許淑絹-愛的真諦 (官方完整版MV)" -> "林佳蓉 許淑絹-愛的真諦"
         "愛的真諦 Official MV [HD]"              -> "愛的真諦"
+        "Amazing Grace ( with Lyrics ) / 奇異恩典( 中文歌詞 ) By Hayley Westenra / 海莉薇思特娜"
+            -> "Amazing Grace / 奇異恩典"
     """
-    # Remove parenthetical notes: (官方MV), (Official MV), etc.
+    # Remove parenthetical notes: (官方MV), (Official MV), (with Lyrics), (中文歌詞), etc.
     title = re.sub(
-        r"\s*[(\（][^)）]*(?:MV|mv|版|HD|hd|lyric|Lyric|LYRIC|video|Video|歌詞)[^)）]*[)\）]",
+        r"\s*[(\（][^)）]*(?:MV|mv|版|HD|hd|lyric|Lyric|LYRIC|video|Video|歌詞|Lyrics|lyrics|with)[^)）]*[)\）]",
         "", title,
     )
     # Remove bracket notes: [HD], [Official], etc.
@@ -39,12 +41,35 @@ def _clean_youtube_title(title: str) -> str:
     )
     # Remove trailing pipe sections: "| 字幕版", "| Official"
     title = re.sub(r"\s*[|｜].*$", "", title)
+    # Remove "By Artist / Artist" suffix (common in bilingual titles)
+    title = re.sub(r"\s+[Bb]y\s+.*$", "", title)
     # Remove common suffixes
     title = re.sub(
         r"\s*(?:官方|完整版|Official|official|MV|mv|Music Video|music video|HD|4K)\s*$",
         "", title,
     )
     return title.strip()
+
+
+def _extract_by_artist(title: str) -> str | None:
+    """Extract artist name from 'By Artist / ...' pattern in raw title.
+
+    Returns the first (primary) artist name, or None if no 'By' pattern found.
+    """
+    m = re.search(r"\s+[Bb]y\s+(.+?)(?:\s*/\s*|\s*$)", title)
+    if m:
+        return m.group(1).strip()
+    return None
+
+
+def _split_slash_parts(title: str) -> list[str]:
+    """Split bilingual titles on '/' separator.
+
+    "Amazing Grace / 奇異恩典" → ["Amazing Grace", "奇異恩典"]
+    Single-segment titles return [title].
+    """
+    parts = [p.strip() for p in title.split("/") if p.strip()]
+    return parts if len(parts) > 1 else [title]
 
 
 def _split_artist_song(title: str) -> tuple[str | None, str]:
@@ -75,30 +100,52 @@ def _build_search_terms(title: str, artist: str | None) -> list[str]:
     Strategies (most specific to least):
     1. song_name + title_artist  (extracted from "Artist-Song" pattern)
     2. song_name + channel_artist
-    3. clean title as-is
-    4. song_name alone
-    5. Repeat key terms in simplified Chinese
+    3. song_name + "By" artist (extracted from raw title)
+    4. Individual slash parts (for bilingual titles like "Amazing Grace / 奇異恩典")
+    5. clean title as-is
+    6. song_name alone
+    + Interleave simplified Chinese versions for each term
     """
     from hanziconv import HanziConv
 
+    by_artist = _extract_by_artist(title)
     clean_title = _clean_youtube_title(title)
     title_artist, song_name = _split_artist_song(clean_title)
 
     terms = []
 
-    # Strategy 1: song_name + artist extracted from title
+    # Strategy 1: song_name + artist extracted from title dash pattern
     if title_artist:
         terms.append(f"{song_name} {title_artist}")
 
     # Strategy 2: song_name + YouTube channel artist
+    # Skip if channel name contains "/" (likely bilingual like "Music Moment / 音樂時刻")
     if artist and artist != title_artist:
-        terms.append(f"{song_name} {artist}")
+        channel_clean = artist.split("/")[0].strip() if "/" in artist else artist
+        terms.append(f"{song_name} {channel_clean}")
 
-    # Strategy 3: clean title as-is (if it's different from song_name)
+    # Strategy 3: song_name + "By" artist from raw title
+    if by_artist and by_artist != title_artist and by_artist != artist:
+        terms.append(f"{song_name} {by_artist}")
+
+    # Strategy 4: Individual slash parts (bilingual titles)
+    slash_parts = _split_slash_parts(clean_title)
+    if len(slash_parts) > 1:
+        for part in slash_parts:
+            part_artist, part_song = _split_artist_song(part)
+            if part_artist:
+                terms.append(f"{part_song} {part_artist}")
+            else:
+                terms.append(part)
+            # Also try slash part + by_artist
+            if by_artist:
+                terms.append(f"{part} {by_artist}")
+
+    # Strategy 5: clean title as-is (if different from song_name)
     if clean_title != song_name:
         terms.append(clean_title)
 
-    # Strategy 4: song_name only
+    # Strategy 6: song_name only
     terms.append(song_name)
 
     # Interleave simplified Chinese versions right after each term.

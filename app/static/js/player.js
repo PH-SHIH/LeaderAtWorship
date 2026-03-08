@@ -11,6 +11,8 @@ let song = null;
 let subtitleLines = [];
 let currentLineIndex = -1;
 let isSeeking = false;
+let currentSubtitleFileId = null;
+let editingLineIndex = -1;
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -64,19 +66,32 @@ function renderSongHeader(song) {
     document.getElementById('song-meta').textContent = parts.join(' | ');
 }
 
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 function renderSubtitleLines(lines) {
     const container = document.getElementById('subtitle-lines');
     container.innerHTML = lines.map((line, i) => `
         <div class="subtitle-line" data-index="${i}" data-start-ms="${line.start_ms}"
-             data-source="${line.source_type || ''}">
+             data-line-id="${line.id || ''}" data-source="${line.source_type || ''}">
             <span class="line-time">${formatTime(line.start_ms)}</span>
-            <span class="line-text">${line.text}</span>
-            ${line.text_secondary ? `<span class="line-text-secondary">${line.text_secondary}</span>` : ''}
+            <span class="line-text">${escapeHtml(line.text)}</span>
+            ${line.text_secondary ? `<span class="line-text-secondary">${escapeHtml(line.text_secondary)}</span>` : ''}
+            <span class="line-actions">
+                <button onclick="event.stopPropagation(); startEditLine(${i})" title="編輯">&#9998;</button>
+                <button onclick="event.stopPropagation(); deleteLine(${i})" title="刪除">&times;</button>
+                <button onclick="event.stopPropagation(); insertLineAfter(${i})" title="插入新行">+</button>
+            </span>
         </div>
     `).join('');
 
-    // Click to seek
+    // Click to seek (but not on action buttons)
     container.addEventListener('click', (e) => {
+        if (e.target.closest('.line-actions')) return;
+        if (e.target.closest('.subtitle-edit-form')) return;
         const lineEl = e.target.closest('.subtitle-line');
         if (lineEl) {
             const startMs = parseInt(lineEl.dataset.startMs);
@@ -85,6 +100,135 @@ function renderSubtitleLines(lines) {
             if (audio.paused) audio.play();
         }
     });
+}
+
+// ── Inline Editing ─────────────────────────────────────────
+
+function startEditLine(index) {
+    editingLineIndex = index;
+    const line = subtitleLines[index];
+    const lineEl = document.querySelectorAll('.subtitle-line')[index];
+    if (!lineEl) return;
+
+    const form = document.createElement('div');
+    form.className = 'subtitle-edit-form';
+    form.innerHTML = `
+        <input type="text" value="${escapeHtml(line.text)}" id="edit-text" placeholder="歌詞文字">
+        <label>起始
+            <input type="number" value="${line.start_ms}" id="edit-start" step="100">
+        </label>
+        <label>結束
+            <input type="number" value="${line.end_ms}" id="edit-end" step="100">
+        </label>
+        <div class="edit-btns">
+            <button class="btn btn-primary" onclick="saveEditLine(${index})" style="font-size: 13px; padding: 4px 10px;">儲存</button>
+            <button class="btn" onclick="cancelEditLine()" style="font-size: 13px; padding: 4px 10px;">取消</button>
+        </div>
+    `;
+
+    lineEl.style.display = 'none';
+    lineEl.parentNode.insertBefore(form, lineEl.nextSibling);
+
+    form.querySelector('#edit-text').focus();
+    form.querySelector('#edit-text').select();
+}
+
+async function saveEditLine(index) {
+    const line = subtitleLines[index];
+    const text = document.getElementById('edit-text').value;
+    const startMs = parseInt(document.getElementById('edit-start').value);
+    const endMs = parseInt(document.getElementById('edit-end').value);
+
+    const body = {};
+    if (text !== line.text) body.text = text;
+    if (startMs !== line.start_ms) body.start_ms = startMs;
+    if (endMs !== line.end_ms) body.end_ms = endMs;
+
+    if (Object.keys(body).length === 0) {
+        cancelEditLine();
+        return;
+    }
+
+    const resp = await fetch(`/api/v1/subtitles/lines/${line.id}`, {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+
+    if (resp.ok) {
+        await reloadSubtitles();
+    } else {
+        alert('儲存失敗');
+    }
+}
+
+function cancelEditLine() {
+    editingLineIndex = -1;
+    const form = document.querySelector('.subtitle-edit-form');
+    if (form) {
+        const hiddenLine = form.previousElementSibling;
+        if (hiddenLine) hiddenLine.style.display = '';
+        form.remove();
+    }
+}
+
+async function deleteLine(index) {
+    const line = subtitleLines[index];
+    if (!confirm(`確定刪除此行？\n「${line.text}」`)) return;
+
+    const resp = await fetch(`/api/v1/subtitles/lines/${line.id}`, {
+        method: 'DELETE',
+    });
+
+    if (resp.ok) {
+        await reloadSubtitles();
+    } else {
+        alert('刪除失敗');
+    }
+}
+
+async function insertLineAfter(index) {
+    const line = subtitleLines[index];
+    const nextLine = subtitleLines[index + 1];
+
+    // Default: insert between current and next line
+    const newStartMs = line.end_ms + 50;
+    const newEndMs = nextLine ? nextLine.start_ms - 50 : line.end_ms + 3000;
+
+    const text = prompt('輸入新行歌詞：');
+    if (!text) return;
+
+    const resp = await fetch(`/api/v1/subtitles/${currentSubtitleFileId}/lines`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            index: line.index + 1,
+            start_ms: Math.max(0, newStartMs),
+            end_ms: Math.max(newStartMs + 100, newEndMs),
+            text,
+        }),
+    });
+
+    if (resp.ok) {
+        await reloadSubtitles();
+    } else {
+        alert('新增失敗');
+    }
+}
+
+async function reloadSubtitles() {
+    cancelEditLine();
+    const subResp = await fetch(`/api/v1/subtitles/by-song/${SONG_ID}`);
+    if (subResp.ok) {
+        const subtitleFiles = await subResp.json();
+        if (subtitleFiles.length > 0 && subtitleFiles[0].lines.length > 0) {
+            const subFile = subtitleFiles[0];
+            currentSubtitleFileId = subFile.id;
+            subtitleLines = subFile.lines.sort((a, b) => a.start_ms - b.start_ms);
+            renderSubtitleLines(subtitleLines);
+            renderAlignmentBadge(subFile);
+        }
+    }
 }
 
 function renderLyrics(lyrics) {
@@ -136,8 +280,10 @@ function setupSubtitleSync(audio) {
         const currentMs = audio.currentTime * 1000;
         const newIndex = findCurrentLine(currentMs);
         if (newIndex !== currentLineIndex) {
-            highlightLine(newIndex);
-            scrollToLine(newIndex);
+            // Skip phantom lines during auto-scroll (they are in instrumental sections)
+            const isPhantom = newIndex >= 0 && subtitleLines[newIndex].source_type === 'phantom';
+            highlightLine(isPhantom ? -1 : newIndex);
+            if (!isPhantom) scrollToLine(newIndex);
             currentLineIndex = newIndex;
         }
     });
@@ -261,9 +407,12 @@ async function init() {
     audio.src = `/api/v1/audio/stream/${SONG_ID}?track=original`;
     document.getElementById('player-section').classList.remove('hidden');
 
-    // Show vocals option if available
+    // Show vocals/accompaniment options if available
     if (song.vocals_path) {
         document.getElementById('vocals-option').classList.remove('hidden');
+    }
+    if (song.accompaniment_path) {
+        document.getElementById('accompaniment-option')?.classList.remove('hidden');
     }
 
     setupPlayerControls(audio);
@@ -275,6 +424,7 @@ async function init() {
         const subtitleFiles = await subResp.json();
         if (subtitleFiles.length > 0 && subtitleFiles[0].lines.length > 0) {
             const subFile = subtitleFiles[0];
+            currentSubtitleFileId = subFile.id;
             subtitleLines = subFile.lines.sort((a, b) => a.start_ms - b.start_ms);
             renderSubtitleLines(subtitleLines);
             renderAlignmentBadge(subFile);

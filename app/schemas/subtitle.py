@@ -4,6 +4,7 @@ from pydantic import BaseModel
 
 
 class SubtitleLineResponse(BaseModel):
+    id: int
     index: int
     start_ms: int
     end_ms: int
@@ -13,6 +14,19 @@ class SubtitleLineResponse(BaseModel):
     source_type: str | None = None
 
     model_config = {"from_attributes": True}
+
+
+class SubtitleLineUpdate(BaseModel):
+    text: str | None = None
+    start_ms: int | None = None
+    end_ms: int | None = None
+
+
+class SubtitleLineCreate(BaseModel):
+    index: int
+    start_ms: int
+    end_ms: int
+    text: str
 
 
 class SubtitleFileResponse(BaseModel):

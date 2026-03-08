@@ -231,6 +231,7 @@ def _warp_gt_lines(
         rate_start = 1.0
         rate_end = 1.0
 
+    first_whisper_start = min(s["start_ms"] for s in whisper_segments)
     last_whisper_end = max(s["end_ms"] for s in whisper_segments)
     segments: list[AlignedSegment] = []
 
@@ -305,9 +306,10 @@ def _warp_gt_lines(
 
         elif anchor_after is not None:
             # Extrapolation: before first anchor
+            # Clamp to first Whisper segment start (don't place lyrics in intro)
             offset = gt_time - anchor_after.gt_time_ms  # negative
             new_start = int(anchor_after.whisper_start_ms + offset * rate_start)
-            new_start = max(0, new_start)
+            new_start = max(first_whisper_start, new_start)
 
             segments.append(AlignedSegment(
                 start_ms=new_start,

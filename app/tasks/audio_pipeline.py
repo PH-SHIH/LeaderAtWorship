@@ -51,13 +51,15 @@ async def run_audio_pipeline(
         # Step 2: Vocal separation (optional — skip if Demucs not installed)
         audio_for_transcription = dl_result.audio_path
         vocals_audio_path = None
+        accompaniment_audio_path = None
         if check_demucs():
             task_store[task_id].update({"status": "separating", "progress": 30})
             t0 = time.perf_counter()
-            vocals_path, _ = await separator.separate(dl_result.audio_path)
+            vocals_path, no_vocals_path = await separator.separate(dl_result.audio_path)
             timings["separation"] = time.perf_counter() - t0
             audio_for_transcription = vocals_path
             vocals_audio_path = vocals_path
+            accompaniment_audio_path = no_vocals_path
             task_store[task_id].update({"progress": 55})
             logger.info("Vocal separation complete in %s", _fmt_elapsed(timings["separation"]))
         else:
@@ -217,6 +219,7 @@ async def run_audio_pipeline(
                     artist=dl_result.artist,
                     audio_path=str(dl_result.audio_path),
                     vocals_path=str(vocals_audio_path) if vocals_audio_path else None,
+                    accompaniment_path=str(accompaniment_audio_path) if accompaniment_audio_path else None,
                 )
                 session.add(song)
                 await session.flush()

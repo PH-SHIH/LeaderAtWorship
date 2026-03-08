@@ -215,6 +215,99 @@
     opacity: 1.0;
 }
 
+/* Manual source type */
+.subtitle-line[data-source="manual"] {
+    border-left: 3px solid #8b5cf6;
+}
+
+/* Inline edit controls */
+.subtitle-line .line-actions {
+    display: none;
+    gap: 4px;
+    flex-shrink: 0;
+    align-items: center;
+}
+
+.subtitle-line:hover .line-actions {
+    display: flex;
+}
+
+.line-actions button {
+    background: none;
+    border: 1px solid var(--border, #d1d5db);
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 6px;
+    color: var(--text-muted, #64748b);
+}
+
+.line-actions button:hover {
+    background: var(--bg, #f1f5f9);
+    color: var(--text, #1e293b);
+}
+
+/* Edit form inline */
+.subtitle-edit-form {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg, #f8fafc);
+    border: 1px solid var(--border, #d1d5db);
+    border-radius: var(--radius, 6px);
+    margin: 2px 0;
+    align-items: center;
+}
+
+.subtitle-edit-form input[type="text"] {
+    flex: 1;
+    min-width: 200px;
+    padding: 4px 8px;
+    border: 1px solid var(--border, #d1d5db);
+    border-radius: 4px;
+    font-size: 16px;
+}
+
+.subtitle-edit-form input[type="number"] {
+    width: 90px;
+    padding: 4px 8px;
+    border: 1px solid var(--border, #d1d5db);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.subtitle-edit-form label {
+    font-size: 12px;
+    color: var(--text-muted, #64748b);
+}
+
+.subtitle-edit-form .edit-btns {
+    display: flex;
+    gap: 6px;
+}
+
+/* Add line button between lines */
+.add-line-btn {
+    display: none;
+    width: 100%;
+    text-align: center;
+    padding: 2px;
+    cursor: pointer;
+    color: var(--text-muted, #94a3b8);
+    font-size: 14px;
+}
+
+.subtitle-lines:hover .add-line-btn {
+    display: block;
+}
+
+.add-line-btn:hover {
+    color: var(--primary, #3b82f6);
+    background: var(--bg, #f1f5f9);
+    border-radius: 4px;
+}
+
 /* Lyrics fallback */
 .lyrics-content {
     white-space: pre-wrap;

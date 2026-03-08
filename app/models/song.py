@@ -17,6 +17,7 @@ class Song(Base):
     tags: Mapped[str | None] = mapped_column(Text)
     audio_path: Mapped[str | None] = mapped_column(String(500))
     vocals_path: Mapped[str | None] = mapped_column(String(500))
+    accompaniment_path: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(default=func.now())
     updated_at: Mapped[datetime] = mapped_column(default=func.now(), onupdate=func.now())
 
