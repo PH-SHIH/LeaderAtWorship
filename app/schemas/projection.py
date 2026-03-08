@@ -26,5 +26,6 @@ class TaskResponse(BaseModel):
     progress: int = 0
     error: str | None = None
     result_id: int | None = None
+    song_id: int | None = None
     video_title: str | None = None
     detail: str | None = None

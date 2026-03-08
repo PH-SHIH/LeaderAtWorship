@@ -40,6 +40,8 @@ class LyricsResponse(BaseModel):
 
 class SongResponse(SongBase):
     id: int
+    audio_path: str | None = None
+    vocals_path: str | None = None
     created_at: datetime
     updated_at: datetime
     lyrics: list[LyricsResponse] = []

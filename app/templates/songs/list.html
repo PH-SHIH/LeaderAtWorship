@@ -41,10 +41,10 @@ async function loadSongs(query = '') {
     }
 
     list.innerHTML = songs.map(s => `
-        <div class="card song-card">
+        <a href="/songs/${s.id}" class="card song-card" style="text-decoration:none; color:inherit; display:block;">
             <h3>${s.title}</h3>
             <p>${s.artist || ''} ${s.key_signature ? '| 調性: ' + s.key_signature : ''}</p>
-        </div>
+        </a>
     `).join('');
 }
 

@@ -141,6 +141,11 @@ function updateProgress(data, taskId) {
         progressBar.classList.add('progress-bar-done');
         document.getElementById('result-actions').classList.remove('hidden');
         document.getElementById('download-link').href = `/api/v1/audio/tasks/${taskId}/download`;
+        if (data.song_id) {
+            const viewLink = document.getElementById('view-song-link');
+            viewLink.href = `/songs/${data.song_id}`;
+            viewLink.textContent = '播放字幕';
+        }
 
         // Re-enable the start button for another task
         const startBtn = document.getElementById('start-btn');

@@ -50,12 +50,14 @@ async def run_audio_pipeline(
 
         # Step 2: Vocal separation (optional — skip if Demucs not installed)
         audio_for_transcription = dl_result.audio_path
+        vocals_audio_path = None
         if check_demucs():
             task_store[task_id].update({"status": "separating", "progress": 30})
             t0 = time.perf_counter()
             vocals_path, _ = await separator.separate(dl_result.audio_path)
             timings["separation"] = time.perf_counter() - t0
             audio_for_transcription = vocals_path
+            vocals_audio_path = vocals_path
             task_store[task_id].update({"progress": 55})
             logger.info("Vocal separation complete in %s", _fmt_elapsed(timings["separation"]))
         else:
@@ -69,10 +71,10 @@ async def run_audio_pipeline(
                 }
             )
 
-        # Step 3: Transcription (required — fail if Whisper not installed)
+        # Step 3: Transcription (required — fail if mlx-whisper not installed)
         if not check_whisper():
             raise MLDependencyError(
-                "Whisper 未安裝。請執行: pip install 'leader-at-worship[ml]'"
+                "mlx-whisper 未安裝。請執行: pip install mlx-whisper"
             )
         task_store[task_id].update({"status": "transcribing", "progress": 60})
         t0 = time.perf_counter()
@@ -99,6 +101,8 @@ async def run_audio_pipeline(
                 song = Song(
                     title=dl_result.title,
                     artist=dl_result.artist,
+                    audio_path=str(dl_result.audio_path),
+                    vocals_path=str(vocals_audio_path) if vocals_audio_path else None,
                 )
                 session.add(song)
                 await session.flush()
@@ -147,6 +151,7 @@ async def run_audio_pipeline(
                 "status": "completed",
                 "progress": 100,
                 "result_id": result_id,
+                "song_id": song_id,
             }
         )
 

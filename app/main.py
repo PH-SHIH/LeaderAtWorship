@@ -57,6 +57,13 @@ def create_app() -> FastAPI:
     async def songs_page(request: Request):
         return templates.TemplateResponse("songs/list.html", {"request": request})
 
+    @app.get("/songs/{song_id}")
+    async def song_detail(request: Request, song_id: int):
+        return templates.TemplateResponse(
+            "songs/detail.html",
+            {"request": request, "song_id": song_id},
+        )
+
     @app.get("/flows")
     async def flows_page(request: Request):
         return templates.TemplateResponse("flows/editor.html", {"request": request})

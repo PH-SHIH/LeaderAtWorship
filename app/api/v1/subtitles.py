@@ -28,6 +28,19 @@ async def get_subtitle(subtitle_id: int, db: AsyncSession = Depends(get_db)):
     return result.scalar_one()
 
 
+@router.get("/by-song/{song_id}", response_model=list[SubtitleFileResponse])
+async def get_subtitles_by_song(song_id: int, db: AsyncSession = Depends(get_db)):
+    """Get all subtitle files for a song, with lines eager-loaded."""
+    stmt = (
+        select(SubtitleFile)
+        .where(SubtitleFile.song_id == song_id)
+        .options(selectinload(SubtitleFile.lines))
+        .order_by(SubtitleFile.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
 @router.post("/generate", response_model=SubtitleFileResponse, status_code=201)
 async def generate_subtitle(
     request: SubtitleGenerateRequest, db: AsyncSession = Depends(get_db)
