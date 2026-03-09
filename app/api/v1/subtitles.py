@@ -7,7 +7,6 @@ from app.api.deps import get_db
 from app.models.subtitle import SubtitleFile, SubtitleLine
 from app.schemas.subtitle import (
     SubtitleFileResponse,
-    SubtitleGenerateRequest,
     SubtitleLineCreate,
     SubtitleLineResponse,
     SubtitleLineUpdate,
@@ -45,14 +44,6 @@ async def get_subtitles_by_song(song_id: int, db: AsyncSession = Depends(get_db)
     )
     result = await db.execute(stmt)
     return result.scalars().all()
-
-
-@router.post("/generate", response_model=SubtitleFileResponse, status_code=201)
-async def generate_subtitle(
-    request: SubtitleGenerateRequest, db: AsyncSession = Depends(get_db)
-):
-    # TODO: Implement subtitle generation from lyrics
-    raise NotImplementedError("Subtitle generation not yet implemented")
 
 
 # ── Subtitle Line CRUD ──────────────────────────────────────

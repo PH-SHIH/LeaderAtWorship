@@ -44,9 +44,3 @@ class SubtitleFileResponse(BaseModel):
     lines: list[SubtitleLineResponse] = []
 
     model_config = {"from_attributes": True}
-
-
-class SubtitleGenerateRequest(BaseModel):
-    song_id: int
-    lyrics_id: int
-    format: str = "srt"
