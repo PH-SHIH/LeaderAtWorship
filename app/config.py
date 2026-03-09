@@ -46,6 +46,9 @@ class Settings(BaseSettings):
     alignment_phantom_threshold_ms: int = 3000    # Max distance for phantom detection
     alignment_output_traditional: bool = True     # Convert output to Traditional Chinese
 
+    # Pipeline concurrency
+    max_concurrent_pipelines: int = 1  # Serialize heavy ML tasks to avoid OOM
+
     # Server
     host: str = "0.0.0.0"
     port: int = 8000

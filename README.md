@@ -77,7 +77,7 @@ uvicorn app.main:app --reload --port 8000
 下載音頻 → 人聲分離 → 語音轉錄 → 歌詞對齊 → 生成 SRT 字幕
 ```
 
-支援多行貼上（每行一個連結），批次處理。
+支援多行貼上（每行一個連結），批次自動排隊處理。
 
 ### 2. 歌曲庫
 
@@ -112,6 +112,9 @@ LAW_WHISPER_LANGUAGE=auto    # auto=自動偵測, zh=中文, en=英文
 # 人聲分離
 LAW_DEMUCS_MODEL=htdemucs    # htdemucs=快速, htdemucs_ft=高品質
 LAW_DEMUCS_JOBS=8            # 並行數（配合 CPU 核心數）
+
+# 管線並行（預設 1，避免 OOM）
+LAW_MAX_CONCURRENT_PIPELINES=1
 
 # 伺服器
 LAW_PORT=8000

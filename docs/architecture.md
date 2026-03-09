@@ -1,6 +1,6 @@
 # LeaderAtWorship 系統架構文件
 
-> 版本：1.1 | 更新日期：2026-03-09
+> 版本：1.2 | 更新日期：2026-03-09
 
 ## 1. 系統概覽
 
@@ -112,16 +112,25 @@ app/api/ws/
 ### 3.3 音頻處理管線
 
 ```
-┌─────────┐    ┌──────────┐    ┌────────────┐    ┌──────────┐
-│ YouTube │───▶│  Demucs   │───▶│ mlx-whisper│───▶│ Aligner  │
-│Download │    │Separation │    │ Transcribe │    │ (anchor) │
-└─────────┘    └──────────┘    └────────────┘    └────┬─────┘
-                                                      │
-┌─────────┐    ┌──────────┐                    ┌──────┴─────┐
-│   DB    │◀───│   SRT    │◀───────────────────│  Lyrics    │
-│ Persist │    │Generator │                    │  Fetcher   │
-└─────────┘    └──────────┘                    └────────────┘
+                    ┌──────────────────────────────────────────┐
+                    │  asyncio.Semaphore(max_concurrent=1)     │
+                    │                                          │
+┌─────────┐  queue  │ ┌─────────┐  ┌──────────┐  ┌──────────┐ │
+│  POST   │───────▶ │ │ YouTube │─▶│  Demucs  │─▶│ Whisper  │ │
+│/extract │  (N件)  │ │Download │  │Separation│  │Transcribe│ │
+└─────────┘         │ └─────────┘  └──────────┘  └────┬─────┘ │
+                    │                                  │       │
+                    │ ┌─────────┐  ┌──────────┐  ┌────┴─────┐ │
+                    │ │   DB    │◀─│   SRT    │◀─│ Aligner  │ │
+                    │ │ Persist │  │Generator │  │+ Fetcher │ │
+                    │ └─────────┘  └──────────┘  └──────────┘ │
+                    └──────────────────────────────────────────┘
+
+狀態流轉：pending → queued → downloading → separating → transcribing
+        → aligning → generating → saving → completed / failed
 ```
+
+批次提交多個 URL 時，Semaphore 確保同一時間只有一條管線執行（Demucs + mlx-whisper 記憶體密集），其餘任務以 `queued` 狀態等候。
 
 ### 3.4 資料模型關聯
 
@@ -236,7 +245,9 @@ Song ──────────┬──────── SongLyrics ──
 POST /api/v1/audio/extract
         │
         ▼
-┌─ Background Task ────────────────────────────┐
+┌─ Semaphore Gate (max_concurrent_pipelines) ──┐
+│  如已有管線執行 → status = "queued" 等待      │
+│  取得鎖後開始執行：                            │
 │  1. yt-dlp download → data/audio/{id}.wav    │
 │  2. Demucs separate → vocals.wav + accomp.wav│
 │  3. mlx-whisper transcribe → segments[]      │
@@ -368,4 +379,5 @@ LeaderAtWorship/
 ### 8.5 為什麼用 In-Memory Task Store 而非 Celery？
 - 單機部署，不需要 Redis/RabbitMQ
 - 背景任務數量少，使用 `asyncio.create_task` 即可
+- `asyncio.Semaphore` 提供輕量級並行控制，序列化 ML 重載任務
 - 簡化部署流程
