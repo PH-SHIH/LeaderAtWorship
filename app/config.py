@@ -25,11 +25,11 @@ class Settings(BaseSettings):
     # htdemucs_ft: 4x slower, ~1-3% better quality
     # mdx_extra: fastest, slightly lower quality
     demucs_model: str = "htdemucs"
-    demucs_device: str = "cpu"  # cpu recommended for Apple Silicon (MPS unreliable)
+    demucs_device: str = "auto"  # auto = MPS on Apple Silicon w/ fallback, or "cpu"/"mps"
     demucs_shifts: int = 1  # equivariance shifts: 1=fast, 2-4=better quality, 10=best
     demucs_segment: int = 7  # chunk size in seconds (htdemucs max: 7.8, must be int)
     demucs_overlap: float = 0.1  # chunk overlap ratio (0.1=fast, 0.25=quality)
-    demucs_jobs: int = 8  # parallel workers (match M3 Max performance core count)
+    demucs_jobs: int = 0  # 0=auto-detect from CPU cores, or set manually
 
     # Lyrics alignment
     alignment_enabled: bool = True
@@ -46,8 +46,10 @@ class Settings(BaseSettings):
     alignment_phantom_threshold_ms: int = 3000    # Max distance for phantom detection
     alignment_output_traditional: bool = True     # Convert output to Traditional Chinese
 
-    # Pipeline concurrency
-    max_concurrent_pipelines: int = 1  # Serialize heavy ML tasks to avoid OOM
+    # Pipeline concurrency — per-stage semaphores for true pipeline parallelism
+    max_concurrent_pipelines: int = 3  # Max songs processed simultaneously
+    max_concurrent_demucs: int = 1  # Demucs is memory-heavy, serialize
+    max_concurrent_whisper: int = 1  # mlx-whisper is memory-heavy, serialize
 
     # Server
     host: str = "0.0.0.0"

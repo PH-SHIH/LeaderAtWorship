@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import os
+import platform
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -8,6 +11,39 @@ from app.config import settings
 from app.utils.deps_check import MLDependencyError, check_demucs
 
 logger = logging.getLogger(__name__)
+
+
+def _detect_device() -> str:
+    """Auto-detect the best device for Demucs on the current platform.
+
+    Priority: user override (settings) > MPS (Apple Silicon) > CPU.
+    """
+    configured = settings.demucs_device
+    if configured != "auto":
+        return configured
+
+    if platform.machine() == "arm64" and sys.platform == "darwin":
+        try:
+            import torch
+            if torch.backends.mps.is_available():
+                logger.info("Apple Silicon MPS detected — using mps device")
+                return "mps"
+        except Exception:
+            pass
+        logger.info("Apple Silicon detected but MPS unavailable — using cpu")
+    return "cpu"
+
+
+def _optimal_jobs() -> int:
+    """Return optimal job count based on platform."""
+    if settings.demucs_jobs > 0:
+        return settings.demucs_jobs
+    # Auto: use performance core count (Apple Silicon) or half of CPU count
+    try:
+        count = os.cpu_count() or 4
+        return max(1, count // 2)
+    except Exception:
+        return 4
 
 
 async def separate(audio_path: Path) -> tuple[Path, Path]:
@@ -34,8 +70,11 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
         logger.info("Reusing existing separation: %s", vocals)
         return vocals, no_vocals
 
+    device = _detect_device()
+    jobs = _optimal_jobs()
+
     cmd = [
-        "python",
+        sys.executable,
         "-m",
         "demucs",
         "--two-stems",
@@ -43,7 +82,7 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
         "-n",
         model_name,
         "-d",
-        settings.demucs_device,
+        device,
         "--shifts",
         str(settings.demucs_shifts),
         "--segment",
@@ -51,7 +90,7 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
         "--overlap",
         str(settings.demucs_overlap),
         "-j",
-        str(settings.demucs_jobs),
+        str(jobs),
         "-o",
         str(output_dir),
         str(audio_path),
@@ -60,20 +99,23 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
     logger.info(
         "Demucs: model=%s device=%s shifts=%d segment=%ds overlap=%.2f jobs=%d",
         model_name,
-        settings.demucs_device,
+        device,
         settings.demucs_shifts,
         settings.demucs_segment,
         settings.demucs_overlap,
-        settings.demucs_jobs,
+        jobs,
     )
 
     def _run_demucs():
         env = {
-            **__import__("os").environ,
-            # Graceful MPS fallback (in case user sets device=mps)
+            **os.environ,
+            # Graceful MPS fallback for ops not yet supported on MPS
             "PYTORCH_ENABLE_MPS_FALLBACK": "1",
-            # Optimal thread count for M3 Max performance cores
-            "OMP_NUM_THREADS": str(settings.demucs_jobs),
+            # Prevent MPS from pre-allocating all GPU memory
+            "PYTORCH_MPS_HIGH_WATERMARK_RATIO": "0.0",
+            # Optimal thread count for Apple Silicon performance cores
+            "OMP_NUM_THREADS": str(jobs),
+            "MKL_NUM_THREADS": str(jobs),
         }
         t0 = time.perf_counter()
         try:
@@ -85,8 +127,21 @@ async def separate(audio_path: Path) -> tuple[Path, Path]:
                 env=env,
             )
         except subprocess.CalledProcessError as e:
+            # Extract last meaningful lines from stderr for user-facing error
+            stderr_lines = (e.stderr or "").strip().splitlines()
+            # Find the actual error — skip traceback preamble
+            error_summary = ""
+            for line in reversed(stderr_lines):
+                stripped = line.strip()
+                if stripped and not stripped.startswith("Traceback") and not stripped.startswith("File "):
+                    error_summary = stripped
+                    break
+            if not error_summary and stderr_lines:
+                error_summary = stderr_lines[-1]
             logger.error("Demucs stderr:\n%s", e.stderr)
-            raise
+            raise RuntimeError(
+                f"Demucs 人聲分離失敗 — {error_summary or '未知錯誤'}"
+            ) from e
         elapsed = time.perf_counter() - t0
         logger.info("Demucs finished in %.1fs", elapsed)
         if result.stderr:
