@@ -8,7 +8,10 @@ const client = new WSClient(SESSION_ID, 'controller', (msg) => {
 
 // Cache items from state for rendering line lists
 let cachedItems = [];
-let cachedLineData = {}; // index -> lines from state_sync
+let currentSongId = null;
+let cachedLineTimings = []; // [{start_ms}, ...] for current item
+let lastSyncedLineIndex = -1;
+let currentLineIndex = 0;
 
 function sendCommand(action) {
     client.send({ action });
@@ -48,7 +51,80 @@ function updateControllerUI(state) {
         renderItemNav(state);
         renderLineNav(state);
     }
+
+    // Cache line timings for audio sync
+    currentLineIndex = state.current_line_index;
+    const lines = state.current_item_lines || [];
+    cachedLineTimings = lines.map(l => l.start_ms || 0);
+
+    // Audio player — update when song changes
+    updateAudioPlayer(state);
 }
+
+// ── Audio Player ──────────────────────────────────────────
+
+function updateAudioPlayer(state) {
+    const section = document.getElementById('audio-player-section');
+    const audio = document.getElementById('audio-player');
+    const title = document.getElementById('audio-title');
+    const songId = state.current_song_id;
+
+    if (!songId) {
+        section.style.display = 'none';
+        if (!audio.paused) audio.pause();
+        currentSongId = null;
+        return;
+    }
+
+    section.style.display = 'block';
+    title.textContent = `播放：${state.current_item_label || ''}`;
+
+    // Only reload audio source when song actually changes
+    if (songId !== currentSongId) {
+        currentSongId = songId;
+        const track = document.querySelector('input[name="track"]:checked').value;
+        audio.src = `/api/v1/audio/stream/${songId}?track=${track}`;
+    }
+}
+
+// Track selector change
+document.querySelectorAll('input[name="track"]').forEach(radio => {
+    radio.addEventListener('change', () => {
+        const audio = document.getElementById('audio-player');
+        if (!currentSongId) return;
+        const currentTime = audio.currentTime;
+        const wasPlaying = !audio.paused;
+        audio.src = `/api/v1/audio/stream/${currentSongId}?track=${radio.value}`;
+        audio.currentTime = currentTime;
+        if (wasPlaying) audio.play();
+    });
+});
+
+// ── Audio-Subtitle Sync ───────────────────────────────────
+
+document.getElementById('audio-player').addEventListener('timeupdate', () => {
+    const audio = document.getElementById('audio-player');
+    if (audio.paused || cachedLineTimings.length === 0) return;
+
+    const currentMs = audio.currentTime * 1000;
+
+    // Find the line whose start_ms is the latest one <= currentMs
+    let targetLine = 0;
+    for (let i = cachedLineTimings.length - 1; i >= 0; i--) {
+        if (cachedLineTimings[i] <= currentMs) {
+            targetLine = i;
+            break;
+        }
+    }
+
+    // Only send command if line actually changed
+    if (targetLine !== currentLineIndex) {
+        currentLineIndex = targetLine;
+        client.send({ action: 'goto_line', index: targetLine });
+    }
+});
+
+// ── Flow Navigation Rendering ─────────────────────────────
 
 function renderItemNav(state) {
     const ul = document.getElementById('item-nav-list');

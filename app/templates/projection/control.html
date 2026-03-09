@@ -29,6 +29,13 @@
     .nav-list li.active .item-type { color: rgba(255,255,255,0.7); }
     .position-info { font-size: 13px; color: #64748b; margin-top: 8px; }
     .panel-title { font-size: 14px; font-weight: 600; margin-bottom: 8px; color: #475569; }
+    .audio-player-section { margin-top: 20px; padding: 16px; background: var(--bg-secondary, #f8fafc); border-radius: 8px; }
+    .audio-player-section h3 { margin: 0 0 10px; font-size: 16px; }
+    .audio-player-section audio { width: 100%; margin-bottom: 10px; }
+    .track-selector { display: flex; gap: 12px; align-items: center; }
+    .track-selector label { cursor: pointer; font-size: 14px; display: flex; align-items: center; gap: 4px; }
+    .track-selector input[type="radio"] { cursor: pointer; }
+    .no-audio-msg { color: #94a3b8; font-size: 14px; }
 </style>
 {% endblock %}
 
@@ -49,6 +56,16 @@
         <button class="btn btn-primary" onclick="sendCommand('next_line')">下一行</button>
         <button class="btn" onclick="sendCommand('next_item')">下一首</button>
         <button class="btn" style="background: #1a1a2e; color: white;" onclick="sendCommand('toggle_blank')">黑幕</button>
+    </div>
+
+    <div class="audio-player-section" id="audio-player-section" style="display: none;">
+        <h3 id="audio-title">播放</h3>
+        <audio id="audio-player" controls></audio>
+        <div class="track-selector">
+            <label><input type="radio" name="track" value="original" checked> 原聲</label>
+            <label><input type="radio" name="track" value="vocals"> 人聲</label>
+            <label><input type="radio" name="track" value="accompaniment"> 伴奏</label>
+        </div>
     </div>
 
     <div class="flow-nav" id="flow-nav" style="display: none;">
@@ -74,6 +91,6 @@
 <script>
     const SESSION_ID = {{ session_id }};
 </script>
-<script src="{{ url_for('static', path='js/ws-client.js') }}"></script>
-<script src="{{ url_for('static', path='js/controller.js') }}"></script>
+<script src="{{ url_for('static', path='js/ws-client.js') }}?v=2"></script>
+<script src="{{ url_for('static', path='js/controller.js') }}?v=2"></script>
 {% endblock %}

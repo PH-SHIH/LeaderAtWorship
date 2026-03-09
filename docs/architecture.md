@@ -1,6 +1,6 @@
 # LeaderAtWorship 系統架構文件
 
-> 版本：1.0 | 更新日期：2026-03-08
+> 版本：1.1 | 更新日期：2026-03-09
 
 ## 1. 系統概覽
 
@@ -96,17 +96,17 @@ app/api/ws/
 **WebSocket 通訊架構：**
 
 ```
-┌──────────┐         ┌──────────────────┐         ┌──────────┐
-│ Control  │ ──cmd──▶│                  │──state──▶│ Display  │
-│  Panel   │◀─state──│   Projection     │         │  Screen  │
-│ (browser)│         │   Manager        │         │ (browser)│
-└──────────┘         │  (in-memory)     │         └──────────┘
-                     └──────────────────┘
-                            │
-                     ┌──────┴───────┐
-                     │ Flow Data    │
-                     │ (preloaded)  │
-                     └──────────────┘
+┌──────────────┐         ┌──────────────────┐         ┌──────────────┐
+│   Control    │ ──cmd──▶│                  │──state──▶│   Display    │
+│    Panel     │◀─state──│   Projection     │         │   Screen     │
+│  (原始頁面)   │         │   Manager        │         │  (新視窗)     │
+│              │         │  (in-memory)     │         │              │
+│ ┌──────────┐ │         └──────────────────┘         │ ┌──────────┐ │
+│ │Audio     │ │                │                     │ │ 5-line   │ │
+│ │Player    │ │         ┌──────┴───────┐             │ │ Lyrics   │ │
+│ │(3-track) │ │         │ Flow Data    │             │ │ Context  │ │
+│ └──────────┘ │         │ (preloaded)  │             │ └──────────┘ │
+└──────────────┘         └──────────────┘             └──────────────┘
 ```
 
 ### 3.3 音頻處理管線
@@ -170,6 +170,7 @@ Song ──────────┬──────── SongLyrics ──
 | CSS | 原生 CSS | 樣式設計 |
 | WebSocket | 原生 WebSocket API | 即時投影通訊 |
 | 拖曳排序 | HTML5 Drag & Drop API | 流程項目排序 |
+| Audio API | HTMLAudioElement + timeupdate | 音頻播放與字幕同步 |
 
 ---
 
@@ -257,7 +258,7 @@ GET /api/v1/audio/tasks/{id} (polling)
 ```
 敬拜流程編輯器
         │
-   「啟動投影」按鈕
+   「啟動投影」按鈕（立即預開空白視窗避免彈窗封鎖）
         │
         ▼
 POST /api/v1/projection/sessions
@@ -270,17 +271,18 @@ POST /api/v1/projection/sessions
   │ 3. 查詢每首歌的最新 SubtitleFile    │
   │ 4. 建構 FlowItemData[] 記憶體結構   │
   │ 5. 初始化 ProjectionState          │
+  │    (含 current_song_id, start_ms)  │
   └────────────────────────────────────┘
         │
         ▼
   回傳 session_id
         │
-  ┌─────┴─────┐
-  ▼           ▼
-Display    Control
-Window     Window
-  │           │
-  └─────┬─────┘
+  ┌─────┴──────────────┐
+  ▼                    ▼
+Display              Control
+(新視窗)             (當前頁面導航)
+  │                    │
+  └─────┬──────────────┘
         │
   WebSocket /ws/projection/{session_id}
         │
@@ -291,9 +293,14 @@ Window     Window
   │   goto_item / goto_line           │
   │   toggle_blank / set_text         │
   │                                    │
+  │ Control 音頻播放 timeupdate:       │
+  │   自動計算 currentMs vs start_ms   │
+  │   → goto_line 自動推進字幕行       │
+  │                                    │
   │ Server 更新 State，廣播到所有 Client│
   │                                    │
-  │ Display 接收 State，更新字幕文字    │
+  │ Display 接收 State，渲染 5 行歌詞   │
+  │  (前2行 + 當前高亮行 + 後2行)       │
   └────────────────────────────────────┘
 ```
 

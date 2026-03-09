@@ -7,6 +7,7 @@ from fastapi import WebSocket
 class SubtitleLineData:
     text: str = ""
     text_secondary: str = ""
+    start_ms: int = 0
 
 
 @dataclass
@@ -31,6 +32,7 @@ class ProjectionState:
     total_lines: int = 0  # lines in current item
     current_item_label: str = ""
     current_item_lines: list[dict] = field(default_factory=list)  # [{text, text_secondary}]
+    current_song_id: int | None = None  # song_id for audio streaming
 
 
 class ProjectionManager:
@@ -48,7 +50,7 @@ class ProjectionManager:
         if state:
             state.flow_id = flow_id
             state.items = [
-                {"label": it.label, "item_type": it.item_type, "line_count": len(it.lines)}
+                {"label": it.label, "item_type": it.item_type, "song_id": it.song_id, "line_count": len(it.lines)}
                 for it in items
             ]
             state.total_items = len(items)
@@ -72,9 +74,10 @@ class ProjectionManager:
 
         item = items[item_idx]
         state.current_item_label = item.label
+        state.current_song_id = item.song_id
         state.total_lines = len(item.lines)
         state.current_item_lines = [
-            {"text": l.text, "text_secondary": l.text_secondary}
+            {"text": l.text, "text_secondary": l.text_secondary, "start_ms": l.start_ms}
             for l in item.lines
         ]
 
