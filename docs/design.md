@@ -1,6 +1,6 @@
 # LeaderAtWorship 詳細設計文件
 
-> 版本：1.0 | 更新日期：2026-03-08
+> 版本：1.1 | 更新日期：2026-03-09
 
 ## 1. 資料庫設計
 
@@ -202,15 +202,16 @@ POST   /api/v1/projection/sessions     # 建立投影 Session
     "current_line_index": 3,
     "is_blank": false,
     "current_text": "主要字幕文字",
-    "current_text_secondary": "Secondary text",
+    "current_text_secondary": "",
+    "current_song_id": 5,
     "items": [
-      {"label": "讚美之泉", "item_type": "song", "line_count": 25}
+      {"label": "讚美之泉", "item_type": "song", "song_id": 5, "line_count": 25}
     ],
     "total_items": 3,
     "total_lines": 25,
     "current_item_label": "讚美之泉",
     "current_item_lines": [
-      {"text": "第一行歌詞", "text_secondary": ""}
+      {"text": "第一行歌詞", "text_secondary": "", "start_ms": 15230}
     ]
   }
 }
@@ -289,6 +290,8 @@ Fallback: 貪婪匹配
   is_blank: 是否黑幕
   current_text: 主要顯示文字
   current_text_secondary: 次要顯示文字
+  current_song_id: 目前歌曲 ID（用於音頻串流）
+  current_item_lines[].start_ms: 每行開始時間（用於音頻同步）
 
 導航規則：
   next_line: line_index + 1（超過當前歌曲行數則不動）
@@ -297,6 +300,13 @@ Fallback: 貪婪匹配
   prev_item: item_index - 1, line_index = 0
   goto_item(n): item_index = n, line_index = 0
   goto_line(n): line_index = n
+
+音頻同步機制：
+  控制端播放音頻時，timeupdate 事件觸發：
+  1. 取得 currentTime (ms)
+  2. 反向遍歷 cachedLineTimings 找到 start_ms ≤ currentMs 的最大 index
+  3. 若 targetLine ≠ currentLineIndex → 送出 goto_line 指令
+  4. Server 廣播新狀態，Display 更新 5 行歌詞視窗
 ```
 
 ### 3.3 音頻串流設計
@@ -398,6 +408,12 @@ def align(
 
 ```python
 @dataclass
+class SubtitleLineData:
+    text: str = ""
+    text_secondary: str = ""
+    start_ms: int = 0           # 用於音頻同步
+
+@dataclass
 class ProjectionState:
     session_id: int
     flow_id: int | None
@@ -406,11 +422,12 @@ class ProjectionState:
     is_blank: bool
     current_text: str
     current_text_secondary: str
-    items: list[dict]           # 項目元資料
+    current_song_id: int | None  # 用於音頻串流 URL
+    items: list[dict]            # 項目元資料 (含 song_id)
     total_items: int
     total_lines: int
     current_item_label: str
-    current_item_lines: list    # 目前歌曲的所有字幕行
+    current_item_lines: list     # [{text, text_secondary, start_ms}, ...]
 
 class ProjectionManager:
     def connect(session_id, websocket, role): ...
@@ -441,27 +458,31 @@ class ProjectionManager:
 | 模組 | 檔案 | 職責 |
 |------|------|------|
 | WebSocket Client | ws-client.js | 連線管理、自動重連、訊息分發 |
-| Projection Display | projection.js | 接收狀態、更新字幕文字 |
-| Projection Controller | controller.js | 發送指令、渲染流程導航 |
-| Audio Player | player.js | 音頻播放、字幕同步、音軌切換 |
+| Projection Display | projection.js | 接收狀態、渲染五行歌詞上下文視窗 |
+| Projection Controller | controller.js | 發送指令、渲染流程導航、音頻播放與字幕同步 |
+| Audio Player | player.js | 歌曲詳情頁音頻播放、字幕同步、音軌切換 |
 
-### 5.3 投影顯示畫面規格
+### 5.3 投影顯示畫面規格（五行歌詞上下文）
 
 ```
 ┌─────────────────────────────────────┐
 │              (全黑背景)              │
 │                                     │
-│                                     │
-│                                     │
-│         主要字幕文字                  │
-│         (白色, 大字)                  │
-│                                     │
-│         次要字幕文字                  │
-│         (灰色, 小字)                  │
-│                                     │
-│                                     │
+│       前第二行歌詞 (淡灰 2.8vw)       │
+│       前第一行歌詞 (半透明 2.8vw)     │
+│       ▶ 當前歌詞行 (白色粗體 4vw) ◀  │
+│       後第一行歌詞 (半透明 2.8vw)     │
+│       後第二行歌詞 (淡灰 2.8vw)       │
 │                                     │
 └─────────────────────────────────────┘
+
+CSS 樣式層級：
+  .lyric-line        → 2.8vw, rgba(255,255,255,0.35)
+  .lyric-line.near   → 2.8vw, rgba(255,255,255,0.55)
+  .lyric-line.active → 4vw, #fff, font-weight:700, text-shadow
+
+邊界處理：
+  若索引 < 0 或 ≥ 總行數 → 顯示 &nbsp; 占位符保持佈局穩定
 ```
 
 ### 5.4 控制面板佈局
@@ -470,6 +491,12 @@ class ProjectionManager:
 ┌─────────────────────────────────────┐
 │  目前字幕文字預覽                     │
 │  [位置資訊: 歌曲 1/3, 行 5/25]        │
+├─────────────────────────────────────┤
+│  [◀上一首] [◀上一行] [下一行▶] [下一首▶] [黑幕] │
+├─────────────────────────────────────┤
+│  音頻播放器（歌曲音頻 + 播放時自動同步字幕）│
+│  [▶播放] ═══════════○═════ 2:35/4:12  │
+│  (○原聲) (○人聲) (○伴奏)              │
 ├──────────────┬──────────────────────┤
 │  流程項目列表  │  字幕行列表           │
 │  ┌──────────┐│  ┌──────────────────┐│
@@ -479,9 +506,7 @@ class ProjectionManager:
 │  └──────────┘│  │  4. 第四行歌詞   ││
 │              │  └──────────────────┘│
 ├──────────────┴──────────────────────┤
-│  [◀ 上一行] [下一行 ▶]               │
-│  [◀◀ 上一首] [下一首 ▶▶]             │
-│  [黑幕] [手動輸入文字]                │
+│  [手動輸入文字]  [送出]               │
 └─────────────────────────────────────┘
 ```
 

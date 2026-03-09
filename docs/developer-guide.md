@@ -1,6 +1,6 @@
 # LeaderAtWorship 開發者文件
 
-> 版本：1.0 | 更新日期：2026-03-08
+> 版本：1.1 | 更新日期：2026-03-09
 
 ## 1. 開發環境設定
 
@@ -332,7 +332,25 @@ await projection_manager.broadcast(session_id, {
 })
 ```
 
-### 7.2 新增指令
+### 7.2 關鍵資料結構
+
+```python
+@dataclass
+class SubtitleLineData:
+    text: str = ""
+    text_secondary: str = ""
+    start_ms: int = 0  # 用於音頻同步
+
+@dataclass
+class ProjectionState:
+    # ... 基本欄位 ...
+    current_song_id: int | None = None  # 用於音頻串流
+    current_item_lines: list[dict]       # 含 start_ms 時間資料
+```
+
+`_resolve_text()` 在切換行或歌曲時，同步設定 `current_song_id` 與含 `start_ms` 的 `current_item_lines`，供控制端音頻播放器與投影端五行歌詞使用。
+
+### 7.3 新增指令
 
 在 `handle_command()` 中加入新的 action 處理：
 
@@ -350,6 +368,56 @@ async def handle_command(self, session_id: int, command: dict):
     # 廣播
     await self.broadcast(session_id, {"type": "state_update", "data": ...})
 ```
+
+### 7.4 音頻-字幕同步機制
+
+控制端 `controller.js` 中的音頻同步透過 `timeupdate` 事件實現：
+
+```javascript
+// 快取每行的 start_ms 時間戳
+cachedLineTimings = lines.map(l => l.start_ms || 0);
+
+// timeupdate 事件觸發時
+audio.addEventListener('timeupdate', () => {
+    const currentMs = audio.currentTime * 1000;
+    // 反向遍歷找到 start_ms ≤ currentMs 的最大 index
+    for (let i = cachedLineTimings.length - 1; i >= 0; i--) {
+        if (cachedLineTimings[i] <= currentMs) {
+            targetLine = i;
+            break;
+        }
+    }
+    if (targetLine !== currentLineIndex) {
+        client.send({ action: 'goto_line', index: targetLine });
+    }
+});
+```
+
+### 7.5 五行歌詞渲染
+
+投影端 `projection.js` 渲染五行歌詞上下文（CONTEXT_LINES = 2）：
+
+```javascript
+// 建構 [idx-2, idx-1, idx, idx+1, idx+2] 視窗
+for (let i = idx - 2; i <= idx + 2; i++) {
+    if (i < 0 || i >= lines.length) {
+        // 空白佔位符保持佈局穩定
+        html += '<div class="lyric-line">&nbsp;</div>';
+    } else {
+        // active / near / 一般 三種樣式
+    }
+}
+```
+
+### 7.6 靜態檔案快取處理
+
+所有 HTML 模板中引用靜態資源時需加上版本參數避免瀏覽器快取：
+
+```html
+<script src="{{ url_for('static', path='js/projection.js') }}?v=2"></script>
+```
+
+更新 JS/CSS 檔案後應遞增版本號。
 
 ---
 
