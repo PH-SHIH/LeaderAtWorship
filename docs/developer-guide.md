@@ -1,6 +1,6 @@
 # LeaderAtWorship 開發者文件
 
-> 版本：1.1 | 更新日期：2026-03-09
+> 版本：1.2 | 更新日期：2026-03-09
 
 ## 1. 開發環境設定
 
@@ -126,18 +126,34 @@ result = await db.execute(stmt)
 flow = result.scalar_one_or_none()
 ```
 
-### 3.3 背景任務
+### 3.3 背景任務與並行控制
 
-使用 FastAPI 的 `BackgroundTasks` 或 `asyncio.create_task`：
+使用 FastAPI 的 `BackgroundTasks` 提交任務，搭配 `asyncio.Semaphore` 序列化 ML 重載管線：
 
 ```python
 @router.post("/audio/extract")
-async def extract_audio(req: AudioExtractRequest):
+async def extract_audio(req: AudioExtractRequest, background_tasks: BackgroundTasks):
     task_id = str(uuid4())
     task_store[task_id] = {"status": "pending", "progress": 0}
-    asyncio.create_task(run_audio_pipeline(task_id, req.url))
+    background_tasks.add_task(run_audio_pipeline, task_id, req.url)
     return {"task_id": task_id}
 ```
+
+`run_audio_pipeline` 內部透過 Semaphore 自動排隊：
+
+```python
+# app/tasks/audio_pipeline.py
+_pipeline_semaphore = asyncio.Semaphore(settings.max_concurrent_pipelines)
+
+async def run_audio_pipeline(task_id, youtube_url, whisper_model=None):
+    sem = _get_semaphore()
+    if sem.locked():
+        task_store[task_id].update({"status": "queued"})
+    async with sem:
+        await _run_audio_pipeline_inner(task_id, youtube_url, whisper_model)
+```
+
+**設計考量：** Demucs 和 mlx-whisper 各自佔用大量記憶體，並行執行會導致 OOM 或 SQLite 寫入鎖定。預設 `max_concurrent_pipelines=1`，可透過 `LAW_MAX_CONCURRENT_PIPELINES` 環境變數調整。
 
 ### 3.4 Pydantic Schema 慣例
 
@@ -268,10 +284,19 @@ async def new_feature_page(request: Request):
 
 ### 6.1 管線架構
 
-`app/tasks/audio_pipeline.py` 中的 `run_audio_pipeline()` 是主編排函式：
+`app/tasks/audio_pipeline.py` 中 `run_audio_pipeline()` 是入口函式，透過 Semaphore 排隊後呼叫 `_run_audio_pipeline_inner()`：
 
 ```python
 async def run_audio_pipeline(task_id, youtube_url, whisper_model=None):
+    """入口：Semaphore 排隊 → 呼叫 inner"""
+    sem = _get_semaphore()
+    if sem.locked():
+        task_store[task_id].update({"status": "queued", "detail": "等待其他任務完成..."})
+    async with sem:
+        await _run_audio_pipeline_inner(task_id, youtube_url, whisper_model)
+
+async def _run_audio_pipeline_inner(task_id, youtube_url, whisper_model=None):
+    """實際管線邏輯，在 Semaphore 保護下執行"""
     try:
         # Step 1: Download (10-25%)
         dl_result = await youtube.download_audio(youtube_url)
@@ -287,7 +312,6 @@ async def run_audio_pipeline(task_id, youtube_url, whisper_model=None):
             lyrics = await lyrics_fetcher.fetch_lyrics(title, artist)
             if lyrics:
                 result = lyrics_aligner.align(segments, lyrics.lines)
-                # Apply alignment if quality passes
 
         # Step 5: Generate SRT (90%)
         srt_content = subtitle_generator.generate_srt(final_segments)

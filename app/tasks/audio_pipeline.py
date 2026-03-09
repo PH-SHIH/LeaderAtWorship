@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import time
 
@@ -11,6 +12,17 @@ from app.tasks.task_store import task_store
 from app.utils.deps_check import MLDependencyError, check_demucs, check_whisper
 
 logger = logging.getLogger(__name__)
+
+# Semaphore to limit concurrent pipelines (Demucs + mlx-whisper are memory-heavy)
+_pipeline_semaphore: asyncio.Semaphore | None = None
+
+
+def _get_semaphore() -> asyncio.Semaphore:
+    """Lazy-init semaphore on the running event loop."""
+    global _pipeline_semaphore
+    if _pipeline_semaphore is None:
+        _pipeline_semaphore = asyncio.Semaphore(settings.max_concurrent_pipelines)
+    return _pipeline_semaphore
 
 
 def _fmt_elapsed(seconds: float) -> str:
@@ -26,11 +38,29 @@ async def run_audio_pipeline(
 ):
     """Orchestrate: download -> separate -> transcribe -> generate subtitle -> persist to DB.
 
+    Uses a semaphore to prevent concurrent pipelines from exhausting
+    Apple Silicon memory (Demucs + mlx-whisper are very heavy).
+
     Args:
         task_id: UUID string for tracking progress in task_store.
         youtube_url: YouTube video URL to process.
         whisper_model: Optional whisper model name override (unused for now).
     """
+    sem = _get_semaphore()
+
+    # If semaphore is full, mark as queued while waiting
+    if sem.locked():
+        task_store[task_id].update({"status": "queued", "detail": "等待其他任務完成..."})
+        logger.info("Task %s queued (semaphore full)", task_id)
+
+    async with sem:
+        await _run_audio_pipeline_inner(task_id, youtube_url, whisper_model)
+
+
+async def _run_audio_pipeline_inner(
+    task_id: str, youtube_url: str, whisper_model: str | None = None
+):
+    """Inner pipeline logic, runs under semaphore protection."""
     pipeline_start = time.perf_counter()
     timings: dict[str, float] = {}
 

@@ -1,6 +1,6 @@
 # LeaderAtWorship 詳細設計文件
 
-> 版本：1.1 | 更新日期：2026-03-09
+> 版本：1.2 | 更新日期：2026-03-09
 
 ## 1. 資料庫設計
 
@@ -514,7 +514,34 @@ CSS 樣式層級：
 
 ## 6. 錯誤處理策略
 
-### 6.1 管線錯誤處理
+### 6.1 管線並行控制
+
+批次提交多個 YouTube 連結時，所有任務共用一個 `asyncio.Semaphore`，確保同一時間只有 `max_concurrent_pipelines`（預設 1）條管線在執行：
+
+```python
+# app/tasks/audio_pipeline.py
+_pipeline_semaphore: asyncio.Semaphore | None = None  # Lazy-init
+
+async def run_audio_pipeline(task_id, youtube_url, whisper_model=None):
+    sem = _get_semaphore()
+    if sem.locked():
+        task_store[task_id].update({"status": "queued", "detail": "等待其他任務完成..."})
+    async with sem:
+        await _run_audio_pipeline_inner(task_id, youtube_url, whisper_model)
+```
+
+**任務狀態流轉：**
+```
+pending → queued（等待 Semaphore）→ downloading → separating
+→ transcribing → aligning → generating → saving → completed / failed
+```
+
+設計考量：
+- Demucs 使用 `demucs_jobs` 個 CPU 線程，mlx-whisper 佔用大量 Apple Silicon 統一記憶體
+- 並行執行多條管線會導致 OOM 或 SQLite 寫入鎖定
+- Semaphore 在 asyncio event loop 層級運作，不需額外基礎設施
+
+### 6.2 管線錯誤處理
 
 | 步驟 | 失敗情境 | 處理方式 |
 |------|---------|---------|
@@ -524,7 +551,7 @@ CSS 樣式層級：
 | 歌詞搜尋 | 找不到歌詞 | 跳過對齊，使用 Whisper 原始結果 |
 | 歌詞對齊 | 品質不達標 | 回退使用 Whisper 原始結果 |
 
-### 6.2 WebSocket 錯誤處理
+### 6.3 WebSocket 錯誤處理
 
 - 連線斷開：Client 自動重連（ws-client.js 內建）
 - Session 不存在：回傳錯誤訊息並關閉連線
@@ -561,6 +588,9 @@ class Settings(BaseSettings):
     alignment_min_confidence: float = 0.5
     alignment_min_match_ratio: float = 0.4
     alignment_output_traditional: bool = True
+
+    # Pipeline concurrency
+    max_concurrent_pipelines: int = 1  # Serialize heavy ML tasks to avoid OOM
 
     # Server
     host: str = "0.0.0.0"
