@@ -4,19 +4,18 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>投影顯示</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='css/projection.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/projection.css') }}?v=2">
 </head>
 <body class="projection-display">
     <div id="subtitle-container">
-        <div id="subtitle-text" class="subtitle-line"></div>
-        <div id="subtitle-text-secondary" class="subtitle-line secondary"></div>
+        <div id="lyrics-lines"></div>
     </div>
     <div id="blank-overlay" class="hidden"></div>
 
     <script>
         const SESSION_ID = {{ session_id }};
     </script>
-    <script src="{{ url_for('static', path='js/ws-client.js') }}"></script>
-    <script src="{{ url_for('static', path='js/projection.js') }}"></script>
+    <script src="{{ url_for('static', path='js/ws-client.js') }}?v=2"></script>
+    <script src="{{ url_for('static', path='js/projection.js') }}?v=2"></script>
 </body>
 </html>

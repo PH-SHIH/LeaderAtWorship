@@ -19,19 +19,31 @@ body.projection-display {
     max-width: 90vw;
 }
 
-.subtitle-line {
-    font-size: 4vw;
-    font-weight: 700;
-    line-height: 1.4;
-    text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
-    transition: opacity 0.3s ease;
+#lyrics-lines {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
 }
 
-.subtitle-line.secondary {
-    font-size: 2.5vw;
+.lyric-line {
+    font-size: 2.8vw;
     font-weight: 400;
-    color: #cccccc;
-    margin-top: 20px;
+    line-height: 1.5;
+    color: rgba(255, 255, 255, 0.35);
+    transition: all 0.3s ease;
+    text-shadow: 1px 1px 4px rgba(0, 0, 0, 0.6);
+}
+
+.lyric-line.active {
+    font-size: 4vw;
+    font-weight: 700;
+    color: #ffffff;
+    text-shadow: 2px 2px 8px rgba(0, 0, 0, 0.8);
+}
+
+.lyric-line.near {
+    color: rgba(255, 255, 255, 0.55);
 }
 
 #blank-overlay {
