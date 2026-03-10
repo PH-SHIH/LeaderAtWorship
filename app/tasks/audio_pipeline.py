@@ -13,16 +13,24 @@ from app.utils.deps_check import MLDependencyError, check_demucs, check_whisper
 
 logger = logging.getLogger(__name__)
 
-# Semaphore to limit concurrent pipelines (Demucs + mlx-whisper are memory-heavy)
-_pipeline_semaphore: asyncio.Semaphore | None = None
+# Per-stage semaphores for pipeline parallelism:
+# - Pipeline: limits total concurrent songs (download + lightweight stages)
+# - Demucs: limits concurrent vocal separation (GPU/memory heavy)
+# - Whisper: limits concurrent transcription (GPU/memory heavy)
+# This lets song A do whisper while song B does demucs while song C downloads.
+_semaphores: dict[str, asyncio.Semaphore] = {}
 
 
-def _get_semaphore() -> asyncio.Semaphore:
-    """Lazy-init semaphore on the running event loop."""
-    global _pipeline_semaphore
-    if _pipeline_semaphore is None:
-        _pipeline_semaphore = asyncio.Semaphore(settings.max_concurrent_pipelines)
-    return _pipeline_semaphore
+def _get_semaphore(name: str) -> asyncio.Semaphore:
+    """Lazy-init per-stage semaphore on the running event loop."""
+    if name not in _semaphores:
+        limits = {
+            "pipeline": settings.max_concurrent_pipelines,
+            "demucs": settings.max_concurrent_demucs,
+            "whisper": settings.max_concurrent_whisper,
+        }
+        _semaphores[name] = asyncio.Semaphore(limits.get(name, 1))
+    return _semaphores[name]
 
 
 def _fmt_elapsed(seconds: float) -> str:
@@ -38,20 +46,24 @@ async def run_audio_pipeline(
 ):
     """Orchestrate: download -> separate -> transcribe -> generate subtitle -> persist to DB.
 
-    Uses a semaphore to prevent concurrent pipelines from exhausting
-    Apple Silicon memory (Demucs + mlx-whisper are very heavy).
+    Uses per-stage semaphores for pipeline parallelism:
+    - Pipeline semaphore: limits total concurrent songs
+    - Demucs semaphore: serializes memory-heavy vocal separation
+    - Whisper semaphore: serializes memory-heavy transcription
+
+    This allows song A to transcribe while song B separates while song C downloads.
 
     Args:
         task_id: UUID string for tracking progress in task_store.
         youtube_url: YouTube video URL to process.
         whisper_model: Optional whisper model name override (unused for now).
     """
-    sem = _get_semaphore()
+    sem = _get_semaphore("pipeline")
 
     # If semaphore is full, mark as queued while waiting
     if sem.locked():
-        task_store[task_id].update({"status": "queued", "detail": "等待其他任務完成..."})
-        logger.info("Task %s queued (semaphore full)", task_id)
+        task_store[task_id].update({"status": "queued", "detail": "排隊中（等待其他任務完成）..."})
+        logger.info("Task %s queued (pipeline semaphore full)", task_id)
 
     async with sem:
         await _run_audio_pipeline_inner(task_id, youtube_url, whisper_model)
@@ -79,14 +91,22 @@ async def _run_audio_pipeline_inner(
         )
 
         # Step 2: Vocal separation (optional — skip if Demucs not installed)
+        # Uses demucs semaphore to serialize memory-heavy GPU work
         audio_for_transcription = dl_result.audio_path
         vocals_audio_path = None
         accompaniment_audio_path = None
         if check_demucs():
-            task_store[task_id].update({"status": "separating", "progress": 30})
-            t0 = time.perf_counter()
-            vocals_path, no_vocals_path = await separator.separate(dl_result.audio_path)
-            timings["separation"] = time.perf_counter() - t0
+            demucs_sem = _get_semaphore("demucs")
+            if demucs_sem.locked():
+                task_store[task_id].update(
+                    {"status": "separating", "progress": 28, "detail": "等待人聲分離資源..."}
+                )
+                logger.info("Task %s waiting for demucs semaphore", task_id)
+            async with demucs_sem:
+                task_store[task_id].update({"status": "separating", "progress": 30, "detail": ""})
+                t0 = time.perf_counter()
+                vocals_path, no_vocals_path = await separator.separate(dl_result.audio_path)
+                timings["separation"] = time.perf_counter() - t0
             audio_for_transcription = vocals_path
             vocals_audio_path = vocals_path
             accompaniment_audio_path = no_vocals_path
@@ -104,14 +124,22 @@ async def _run_audio_pipeline_inner(
             )
 
         # Step 3: Transcription (required — fail if mlx-whisper not installed)
+        # Uses whisper semaphore to serialize memory-heavy GPU work
         if not check_whisper():
             raise MLDependencyError(
                 "mlx-whisper 未安裝。請執行: pip install mlx-whisper"
             )
-        task_store[task_id].update({"status": "transcribing", "progress": 60})
-        t0 = time.perf_counter()
-        segments = await transcriber.transcribe(audio_for_transcription)
-        timings["transcription"] = time.perf_counter() - t0
+        whisper_sem = _get_semaphore("whisper")
+        if whisper_sem.locked():
+            task_store[task_id].update(
+                {"status": "transcribing", "progress": 58, "detail": "等待語音轉錄資源..."}
+            )
+            logger.info("Task %s waiting for whisper semaphore", task_id)
+        async with whisper_sem:
+            task_store[task_id].update({"status": "transcribing", "progress": 60, "detail": ""})
+            t0 = time.perf_counter()
+            segments = await transcriber.transcribe(audio_for_transcription)
+            timings["transcription"] = time.perf_counter() - t0
         task_store[task_id].update({"progress": 85})
         logger.info(
             "Transcription complete: %d segments in %s",
@@ -232,6 +260,18 @@ async def _run_audio_pipeline_inner(
             except Exception:
                 logger.warning("Lyrics alignment failed (non-fatal)", exc_info=True)
                 timings["alignment"] = 0
+
+        # Step 3.7: Convert to Traditional Chinese if alignment was not applied
+        # Whisper outputs simplified Chinese; convert for display consistency
+        if subtitle_source == "whisper" and settings.alignment_output_traditional:
+            try:
+                import opencc
+                converter = opencc.OpenCC("s2twp")
+                for seg in segments:
+                    seg["text"] = converter.convert(seg["text"])
+                logger.info("Converted %d Whisper segments to Traditional Chinese", len(segments))
+            except ImportError:
+                logger.warning("OpenCC not installed — skipping Traditional Chinese conversion")
 
         # Step 4: Generate SRT file
         task_store[task_id].update({"status": "generating", "progress": 90})

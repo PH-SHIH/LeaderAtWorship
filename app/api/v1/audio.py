@@ -1,8 +1,9 @@
+import asyncio
 from pathlib import Path
 from uuid import uuid4
 
 import aiofiles
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
 from app.schemas.projection import AudioExtractRequest, TaskResponse
@@ -13,16 +14,18 @@ router = APIRouter()
 
 
 @router.post("/extract", response_model=TaskResponse)
-async def extract_audio(
-    request: AudioExtractRequest,
-    background_tasks: BackgroundTasks,
-):
-    """Submit a YouTube URL for audio extraction and transcription."""
+async def extract_audio(request: AudioExtractRequest):
+    """Submit a YouTube URL for audio extraction and transcription.
+
+    Uses asyncio.create_task for true concurrent execution — multiple songs
+    can pipeline through different stages simultaneously.
+    """
     task_id = str(uuid4())
     task_store[task_id] = {"status": "pending", "progress": 0}
 
-    background_tasks.add_task(
-        run_audio_pipeline, task_id, request.url, request.whisper_model
+    # create_task allows true concurrency (BackgroundTasks runs sequentially)
+    asyncio.create_task(
+        run_audio_pipeline(task_id, request.url, request.whisper_model)
     )
 
     return TaskResponse(task_id=task_id, status="pending")

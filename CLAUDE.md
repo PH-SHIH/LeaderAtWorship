@@ -46,15 +46,15 @@ app/
 
   services/            # Business logic
     youtube.py         # yt-dlp download -> WAV
-    separator.py       # Demucs -> (vocals, no_vocals) paths
-    transcriber.py     # mlx-whisper -> segments with timestamps
-    lyrics_fetcher.py  # syncedlyrics online search (multi-strategy)
+    separator.py       # Demucs -> (vocals, no_vocals) paths; MPS auto-detect
+    transcriber.py     # mlx-whisper -> segments; hallucination filter
+    lyrics_fetcher.py  # Multi-provider lyrics search (LRCLIB + syncedlyrics)
     lyrics_aligner.py  # Anchor-based DP alignment algorithm
     subtitle_generator.py  # SRT/VTT file generation
     projection_manager.py  # WebSocket state + broadcasting
 
   tasks/
-    audio_pipeline.py  # Orchestrator: download->separate->transcribe->align->save
+    audio_pipeline.py  # Orchestrator with per-stage semaphores for pipeline parallelism
     task_store.py      # In-memory task dict (no persistence)
 
   utils/
@@ -124,7 +124,11 @@ Commands: next_line, prev_line, goto_line, next_item, prev_item, goto_item, togg
 
 - **Async-first**: All DB operations use AsyncSession
 - **selectinload**: Eager-load relationships (lines, items, songs)
-- **Background tasks**: asyncio.create_task for pipeline, poll via task_store
+- **Pipeline parallelism**: Per-stage semaphores (pipeline/demucs/whisper) via asyncio.create_task; song A transcribes while song B separates while song C downloads
+- **Apple Silicon optimized**: MPS auto-detect for Demucs, mlx-whisper for transcription, PYTORCH_MPS_HIGH_WATERMARK_RATIO=0.0
+- **Hallucination filter**: Post-transcription filter removes repeated chars, abnormally long segments, YouTube outro hallucinations
+- **Traditional Chinese**: OpenCC s2twp conversion applied — in alignment output or as fallback on raw Whisper text
+- **Multi-provider lyrics**: LRCLIB direct API + syncedlyrics (NetEase→Musixmatch→Lrclib→Megalobiz→Genius) with multi-artist splitting and CJK validation
 - **source_type tracking**: SubtitleLine.source_type = anchor|interpolated|extrapolated|phantom|greedy|manual
 - **Alignment confidence**: Per-file (alignment_confidence) and per-line (confidence)
 - **Bilingual support**: text + text_secondary on SubtitleLine
@@ -143,6 +147,11 @@ Key settings in `app/config.py`:
 - `LAW_DATABASE_URL` — SQLite connection string
 - `LAW_WHISPER_MODEL` — mlx-whisper model name
 - `LAW_DEMUCS_MODEL` — Demucs model (htdemucs)
+- `LAW_DEMUCS_DEVICE` — `auto` (MPS auto-detect), `cpu`, or `mps`
+- `LAW_DEMUCS_JOBS` — `0` = auto-detect from CPU cores
+- `LAW_MAX_CONCURRENT_PIPELINES` — Max songs processed simultaneously (default 3)
+- `LAW_MAX_CONCURRENT_DEMUCS` — Demucs concurrency (default 1, memory-heavy)
+- `LAW_MAX_CONCURRENT_WHISPER` — Whisper concurrency (default 1, memory-heavy)
 - Various alignment thresholds (anchor_ratio, confidence, etc.)
 
 ## Testing
