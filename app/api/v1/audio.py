@@ -6,6 +6,9 @@ import aiofiles
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
+from app.database import async_session_factory
+from app.models.song import Song
+from app.models.subtitle import SubtitleFile
 from app.schemas.projection import AudioExtractRequest, TaskResponse
 from app.tasks.audio_pipeline import run_audio_pipeline
 from app.tasks.task_store import task_store
@@ -80,9 +83,6 @@ async def download_result(task_id: str):
     if not result_id:
         raise HTTPException(status_code=404, detail="No result file")
 
-    from app.database import async_session_factory
-    from app.models.subtitle import SubtitleFile
-
     async with async_session_factory() as session:
         subtitle_file = await session.get(SubtitleFile, result_id)
         if not subtitle_file:
@@ -102,9 +102,6 @@ async def download_result(task_id: str):
 @router.get("/stream/{song_id}")
 async def stream_audio(song_id: int, track: str = "original", request: Request = None):
     """Stream audio file with HTTP Range request support for seeking."""
-    from app.database import async_session_factory
-    from app.models.song import Song
-
     async with async_session_factory() as session:
         song = await session.get(Song, song_id)
         if not song:
