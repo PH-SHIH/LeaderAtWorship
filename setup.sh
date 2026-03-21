@@ -69,8 +69,8 @@ echo "[OK] Activated: $(python --version)"
 # ── 5. Python Dependencies ───────────────────
 echo ""
 echo "[*] Installing Python dependencies..."
-pip install --upgrade pip -q
-pip install -e ".[ml,dev]" -q
+python -m pip install --upgrade pip -q
+python -m pip install -e ".[ml,dev]" -q
 echo "[OK] All Python packages installed"
 
 # ── 6. Environment Config ────────────────────
@@ -87,7 +87,7 @@ fi
 echo ""
 echo "[*] Setting up database..."
 mkdir -p data/db data/audio data/exports data/models
-alembic upgrade head
+python -m alembic upgrade head
 echo "[OK] Database ready"
 
 # ── 8. Summary ───────────────────────────────
