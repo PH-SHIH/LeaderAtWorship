@@ -55,8 +55,23 @@ fi
 # ── 4. Virtual Environment ───────────────────
 echo ""
 VENV_DIR=".venv"
+NEED_VENV=false
 if [[ ! -d "$VENV_DIR" ]]; then
-    echo "[*] Creating virtual environment..."
+    NEED_VENV=true
+elif [[ -f "$VENV_DIR/bin/python3" ]]; then
+    # Check if existing venv uses the correct Python version
+    VENV_PY_VER=$("$VENV_DIR/bin/python3" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')" 2>/dev/null || echo "0.0")
+    VENV_MAJOR=$(echo "$VENV_PY_VER" | cut -d. -f1)
+    VENV_MINOR=$(echo "$VENV_PY_VER" | cut -d. -f2)
+    if [[ "$VENV_MAJOR" -lt 3 || "$VENV_MINOR" -lt 10 ]]; then
+        echo "[!] Existing venv uses Python $VENV_PY_VER (< 3.10), rebuilding..."
+        rm -rf "$VENV_DIR"
+        NEED_VENV=true
+    fi
+fi
+
+if [[ "$NEED_VENV" == true ]]; then
+    echo "[*] Creating virtual environment with $PYTHON_CMD..."
     $PYTHON_CMD -m venv "$VENV_DIR"
 else
     echo "[OK] Virtual environment exists"
