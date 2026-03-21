@@ -1,9 +1,10 @@
 """Fetch synced lyrics (LRC format) from online providers.
 
 Multi-strategy search with Chinese-optimized provider ordering:
-1. syncedlyrics (Musixmatch, NetEase, Lrclib, etc.)
-2. LRCLIB direct REST API (high-quality community database)
+1. LRCLIB direct REST API (high-quality community database)
+2. syncedlyrics_aio (Tencent/QQ Music, NetEase, Musixmatch, Lrclib, etc.)
 3. Fallback to plain (unsynced) lyrics when synced unavailable
+4. Song-name-only last-resort search (handles wrong artist metadata)
 
 Search term generation splits multi-artist names and interleaves
 simplified/traditional Chinese variants for maximum coverage.
@@ -24,7 +25,7 @@ class FetchResult:
     """Result of a lyrics fetch attempt."""
 
     lines: list[LrcLine]
-    provider: str  # e.g. "syncedlyrics", "lrclib"
+    provider: str  # e.g. "syncedlyrics_aio", "lrclib"
     raw_lrc: str  # Original LRC content for storage
     has_timestamps: bool
 
@@ -131,13 +132,13 @@ def _build_search_terms(title: str, artist: str | None) -> list[str]:
     """Build an ordered list of search term variations to try.
 
     Strategies (most specific to least):
-    1. song_name + full artist string
-    2. song_name + individual artists (split from multi-artist)
-    3. song_name + channel_artist
-    4. song_name + "By" artist
-    5. Individual slash parts (bilingual titles)
-    6. clean title as-is
-    7. song_name alone
+    1. song_name alone (highest priority for Chinese songs — most reliable)
+    2. song_name + full artist string
+    3. song_name + individual artists (split from multi-artist)
+    4. song_name + channel_artist
+    5. song_name + "By" artist
+    6. Individual slash parts (bilingual titles)
+    7. clean title as-is
     + Interleave simplified Chinese versions for each term
     """
     from hanziconv import HanziConv
@@ -148,7 +149,11 @@ def _build_search_terms(title: str, artist: str | None) -> list[str]:
 
     terms = []
 
-    # Strategy 1 & 2: song_name + artists (full then individual)
+    # Strategy 1: song_name only (most effective for Chinese songs where
+    # YouTube artist metadata is often wrong — e.g. record label instead of singer)
+    terms.append(song_name)
+
+    # Strategy 2 & 3: song_name + artists (full then individual)
     if title_artist:
         terms.append(f"{song_name} {title_artist}")
         # Split multi-artist and try each individually
@@ -157,16 +162,16 @@ def _build_search_terms(title: str, artist: str | None) -> list[str]:
             if term not in terms:
                 terms.append(term)
 
-    # Strategy 3: song_name + YouTube channel artist
+    # Strategy 4: song_name + YouTube channel artist
     if artist and artist != title_artist:
         channel_clean = artist.split("/")[0].strip() if "/" in artist else artist
         terms.append(f"{song_name} {channel_clean}")
 
-    # Strategy 4: song_name + "By" artist from raw title
+    # Strategy 5: song_name + "By" artist from raw title
     if by_artist and by_artist != title_artist and by_artist != artist:
         terms.append(f"{song_name} {by_artist}")
 
-    # Strategy 5: Individual slash parts (bilingual titles)
+    # Strategy 6: Individual slash parts (bilingual titles)
     slash_parts = _split_slash_parts(clean_title)
     if len(slash_parts) > 1:
         for part in slash_parts:
@@ -178,20 +183,17 @@ def _build_search_terms(title: str, artist: str | None) -> list[str]:
             if by_artist:
                 terms.append(f"{part} {by_artist}")
 
-    # Strategy 6: clean title as-is (if different from song_name)
+    # Strategy 7: clean title as-is (if different from song_name)
     if clean_title != song_name:
         terms.append(clean_title)
-
-    # Strategy 7: song_name only
-    terms.append(song_name)
 
     # Interleave simplified Chinese versions right after each term.
     interleaved = []
     for t in terms:
+        interleaved.append(t)
         simplified = HanziConv.toSimplified(t)
         if simplified != t:
             interleaved.append(simplified)
-        interleaved.append(t)
     terms = interleaved
 
     # Deduplicate while preserving order
@@ -298,30 +300,35 @@ def _get_lrclib(title: str, artist: str) -> str | None:
 
 
 # ---------------------------------------------------------------------------
-# Provider: syncedlyrics (multi-provider wrapper)
+# Provider: syncedlyrics_aio (async multi-provider wrapper)
 # ---------------------------------------------------------------------------
 
 # Provider ordering optimized for Chinese worship songs:
-# NetEase: best for Chinese songs (largest Chinese lyrics DB)
+# Tencent (QQ Music): largest Chinese lyrics database, best coverage for Chinese songs
+# NetEase: second largest Chinese lyrics DB
 # Musixmatch: good global coverage, supports translations
 # Lrclib: community-maintained, high quality
 # Others: additional fallbacks
-_CHINESE_PROVIDER_ORDER = ["netease", "musixmatch", "lrclib", "megalobiz", "genius"]
+_CHINESE_PROVIDER_ORDER = [
+    "tencent", "netease", "musixmatch", "lrclib", "megalobiz", "genius",
+]
 
 
-def _search_syncedlyrics(search_term: str, synced_only: bool = True) -> str | None:
-    """Search using syncedlyrics library with Chinese-optimized provider order."""
-    import syncedlyrics
+async def _search_syncedlyrics_aio(
+    search_term: str, synced_only: bool = True,
+) -> str | None:
+    """Search using syncedlyrics_aio library with Chinese-optimized provider order."""
+    import syncedlyrics_aio
 
     try:
-        result = syncedlyrics.search(
+        result = await syncedlyrics_aio.search(
             search_term,
             synced_only=synced_only,
             providers=_CHINESE_PROVIDER_ORDER,
         )
         return result
     except Exception as e:
-        logger.debug("syncedlyrics search failed for '%s': %s", search_term, e)
+        logger.debug("syncedlyrics_aio search failed for '%s': %s", search_term, e)
         return None
 
 
@@ -360,24 +367,25 @@ async def fetch_lyrics(title: str, artist: str | None = None) -> FetchResult | N
 
     Search phases:
     1. LRCLIB direct API (fast, high quality)
-    2. syncedlyrics with Chinese-optimized provider order (synced only)
-    3. syncedlyrics fallback (allow plain lyrics)
+    2. syncedlyrics_aio with Chinese-optimized provider order (synced only)
+       — includes Tencent/QQ Music, NetEase, Musixmatch, etc.
+    3. syncedlyrics_aio fallback (allow plain lyrics)
+    4. Song-name-only last-resort (handles wrong YouTube artist metadata)
 
     Each phase tries all search term variations before moving to the next.
 
     Returns None if no lyrics found from any provider.
     """
+    search_terms = _build_search_terms(title, artist)
+    _, song_name = _split_artist_song(_clean_youtube_title(title))
 
-    def _fetch():
-        search_terms = _build_search_terms(title, artist)
-        _, song_name = _split_artist_song(_clean_youtube_title(title))
+    logger.info(
+        "Lyrics search: %d terms to try for '%s'",
+        len(search_terms), song_name,
+    )
 
-        logger.info(
-            "Lyrics search: %d terms to try for '%s'",
-            len(search_terms), song_name,
-        )
-
-        # Phase 1: LRCLIB direct API (fast exact match + search)
+    # Phase 1: LRCLIB direct API (fast exact match + search) — sync, run in thread
+    def _lrclib_phase():
         if artist:
             lrc = _get_lrclib(song_name, artist)
             if lrc and _validate_lrc_content(lrc, song_name):
@@ -389,28 +397,47 @@ async def fetch_lyrics(title: str, artist: str | None = None) -> FetchResult | N
             if lrc and _validate_lrc_content(lrc, song_name):
                 return lrc, "lrclib"
 
-        # Phase 2: syncedlyrics — synced only, Chinese-optimized providers
-        for term in search_terms:
-            logger.info("syncedlyrics search (synced): %s", term)
-            lrc = _search_syncedlyrics(term, synced_only=True)
-            if lrc and _validate_lrc_content(lrc, song_name):
-                return lrc, "syncedlyrics"
-
-        # Phase 3: syncedlyrics — allow plain text lyrics as last resort
-        for term in search_terms:
-            logger.info("syncedlyrics search (plain fallback): %s", term)
-            lrc = _search_syncedlyrics(term, synced_only=False)
-            if lrc and _validate_lrc_content(lrc, song_name):
-                return lrc, "syncedlyrics-plain"
-
         return None, None
 
-    lrc_text, provider = await asyncio.to_thread(_fetch)
+    lrc_text, provider = await asyncio.to_thread(_lrclib_phase)
+    if lrc_text:
+        return _make_result(lrc_text, provider)
 
-    if not lrc_text:
-        logger.info("No lyrics found after trying all strategies and providers")
-        return None
+    # Phase 2: syncedlyrics_aio — synced only, Chinese-optimized providers
+    for term in search_terms:
+        logger.info("syncedlyrics_aio search (synced): %s", term)
+        lrc = await _search_syncedlyrics_aio(term, synced_only=True)
+        if lrc and _validate_lrc_content(lrc, song_name):
+            return _make_result(lrc, "syncedlyrics_aio")
 
+    # Phase 3: syncedlyrics_aio — allow plain text lyrics
+    for term in search_terms:
+        logger.info("syncedlyrics_aio search (plain fallback): %s", term)
+        lrc = await _search_syncedlyrics_aio(term, synced_only=False)
+        if lrc and _validate_lrc_content(lrc, song_name):
+            return _make_result(lrc, "syncedlyrics_aio-plain")
+
+    # Phase 4: Song-name-only last-resort with simplified Chinese variant
+    # Handles cases where YouTube artist metadata is wrong (e.g. record label)
+    from hanziconv import HanziConv
+    song_name_only_terms = [song_name]
+    simplified = HanziConv.toSimplified(song_name)
+    if simplified != song_name:
+        song_name_only_terms.append(simplified)
+
+    for term in song_name_only_terms:
+        if term not in search_terms:
+            logger.info("Last-resort song-name-only search: %s", term)
+            lrc = await _search_syncedlyrics_aio(term, synced_only=False)
+            if lrc and _validate_lrc_content(lrc, song_name):
+                return _make_result(lrc, "syncedlyrics_aio-lastresort")
+
+    logger.info("No lyrics found after trying all strategies and providers")
+    return None
+
+
+def _make_result(lrc_text: str, provider: str) -> FetchResult | None:
+    """Parse LRC text and build a FetchResult."""
     lines = parse_lrc(lrc_text)
     if not lines:
         logger.warning("LRC parsed but yielded no lines")
@@ -425,7 +452,7 @@ async def fetch_lyrics(title: str, artist: str | None = None) -> FetchResult | N
 
     return FetchResult(
         lines=lines,
-        provider=provider or "unknown",
+        provider=provider,
         raw_lrc=lrc_text,
         has_timestamps=has_timestamps,
     )

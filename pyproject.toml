@@ -19,9 +19,12 @@ dependencies = [
     "yt-dlp>=2025.1.15",
 
     # Lyrics alignment
-    "syncedlyrics>=0.10.0",
+    "syncedlyrics_aio>=1.0.2",
     "rapidfuzz>=3.0.0",
     "hanziconv>=0.3.2",
+
+    # Chinese conversion
+    "opencc-python-reimplemented>=0.1.7",
 
     # Utilities
     "pydantic>=2.10.0",
