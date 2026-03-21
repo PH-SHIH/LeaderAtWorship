@@ -38,6 +38,7 @@ async def download_audio(url: str) -> DownloadResult:
         ],
         "quiet": True,
         "no_warnings": True,
+        "noplaylist": True,
     }
 
     # Auto-detect ffmpeg location if not on PATH
