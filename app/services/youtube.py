@@ -40,6 +40,15 @@ async def download_audio(url: str) -> DownloadResult:
         "no_warnings": True,
     }
 
+    # Auto-detect ffmpeg location if not on PATH
+    import shutil
+
+    if not shutil.which("ffmpeg"):
+        for candidate in ["/opt/homebrew/bin", "/usr/local/bin"]:
+            if Path(candidate, "ffmpeg").exists():
+                ydl_opts["ffmpeg_location"] = candidate
+                break
+
     def _download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
