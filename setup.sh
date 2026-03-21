@@ -64,13 +64,13 @@ fi
 
 # Activate
 source "$VENV_DIR/bin/activate"
-echo "[OK] Activated: $(python --version)"
+echo "[OK] Activated: $(python3 --version)"
 
 # ── 5. Python Dependencies ───────────────────
 echo ""
 echo "[*] Installing Python dependencies..."
-python -m pip install --upgrade pip -q
-python -m pip install -e ".[ml,dev]" -q
+python3 -m pip install --upgrade pip -q
+python3 -m pip install -e ".[ml,dev]" -q
 echo "[OK] All Python packages installed"
 
 # ── 6. Environment Config ────────────────────
@@ -87,7 +87,7 @@ fi
 echo ""
 echo "[*] Setting up database..."
 mkdir -p data/db data/audio data/exports data/models
-python -m alembic upgrade head
+python3 -m alembic upgrade head
 echo "[OK] Database ready"
 
 # ── 8. Summary ───────────────────────────────
